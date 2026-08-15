@@ -416,6 +416,13 @@ button:focus-visible {
   background: rgba(255, 255, 255, .045);
 }
 
+.control-hint {
+  margin: 7px 2px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .orientation-option {
   display: flex;
   min-height: 38px;
@@ -615,6 +622,23 @@ button:focus-visible {
 
   .scene-tab {
     padding-inline: 7px;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  #sceneTabs,
+  .count-stepper,
+  .score-box,
+  .tool,
+  #controlStatus,
+  .intro-panel,
+  #orientationGuard {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  #controlStatus {
+    background: rgba(13, 15, 14, .9);
   }
 }
 

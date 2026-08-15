@@ -4,10 +4,10 @@ Juego de inclinacion con fisica Matter.js y render 3D Three.js.
 
 ## Caracteristicas
 
-- Control por inclinacion en telefonos y tablets.
-- Seleccion y bloqueo de orientacion vertical u horizontal, con aviso de giro como respaldo.
+- Movimiento automatico con direccion por inclinacion lateral en telefonos y tablets.
+- Bloqueo de orientacion vertical u horizontal en su lado principal, con aviso de giro como respaldo.
 - Pantalla activa durante la partida mediante Screen Wake Lock.
-- Flechas, WASD y puntero en escritorio.
+- Flechas izquierda/derecha, A/D y puntero en escritorio.
 - Entre 1 y 5 pelotas por ronda.
 - Entre 1 y 5 troneras distribuidas en zonas aleatorias.
 - Pool Club, Terraza y Arcade.

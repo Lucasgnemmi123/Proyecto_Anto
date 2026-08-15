@@ -31,10 +31,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
   const resultCallout = document.getElementById('resultCallout');
   const resultText = document.getElementById('resultText');
   const orientationGuard = document.getElementById('orientationGuard');
+  const orientationGuardTitle = document.getElementById('orientationGuardTitle');
   const orientationGuardText = document.getElementById('orientationGuardText');
   const orientationOptions = [...document.querySelectorAll('.orientation-option')];
   const themeMeta = document.querySelector('meta[name="theme-color"]');
   const audio = new AudioController();
+  const mobileOptimized = navigator.maxTouchPoints > 0 || window.matchMedia('(any-pointer: coarse)').matches;
+  const renderPixelRatio = mobileOptimized ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
+  const geometryDetail = mobileOptimized
+    ? { sphereWidth: 24, sphereHeight: 16, cylinder: 24, torusTube: 8, torusRadial: 32, ring: 32, shape: 16 }
+    : { sphereWidth: 40, sphereHeight: 28, cylinder: 48, torusTube: 12, torusRadial: 64, ring: 64, shape: 32 };
 
   let W = Math.max(320, window.innerWidth);
   let H = Math.max(320, window.innerHeight);
@@ -57,10 +63,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let neutralGamma = null;
   let rawBeta = 0;
   let rawGamma = 0;
-  let smoothX = 0;
-  let smoothY = 0;
+  let smoothSteering = 0;
   let keyboardX = 0;
-  let keyboardY = 0;
   let pointerActive = false;
   let sensorEnabled = false;
   let orientationLockPending = false;
@@ -69,6 +73,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let feltMesh = null;
   let feltMaterial = null;
   let activeEffect = null;
+  let resizeTimer = 0;
+  let resizeNeedsCalibration = false;
   const balls = [];
   const pockets = [];
   const ballByBodyId = new Map();
@@ -92,15 +98,15 @@ import { SCENARIOS, SETTINGS } from './config.js';
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 160);
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: !mobileOptimized,
     alpha: false,
     powerPreference: 'high-performance'
   });
 
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(renderPixelRatio);
   renderer.setSize(W, H, false);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = !mobileOptimized;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.08;
@@ -113,6 +119,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
   const ballsRoot = new THREE.Group();
   const effectsRoot = new THREE.Group();
   scene.add(environmentRoot, tableRoot, lightsRoot, pocketRoot, ballsRoot, effectsRoot);
+  const ballRotationAxis = new THREE.Vector3();
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -146,41 +153,46 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function makeNoiseTexture(base, fleck) {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
+    const textureSize = mobileOptimized ? 128 : 256;
+    canvas.width = textureSize;
+    canvas.height = textureSize;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = base;
-    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillRect(0, 0, textureSize, textureSize);
     ctx.globalAlpha = .12;
     ctx.fillStyle = fleck;
-    for (let i = 0; i < 3200; i++) {
+    const lightFlecks = mobileOptimized ? 900 : 3200;
+    for (let i = 0; i < lightFlecks; i++) {
       const size = Math.random() > .92 ? 2 : 1;
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, size, size);
+      ctx.fillRect(Math.random() * textureSize, Math.random() * textureSize, size, size);
     }
     ctx.globalAlpha = .055;
     ctx.fillStyle = '#000000';
-    for (let i = 0; i < 1500; i++) ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 1);
+    const darkFlecks = mobileOptimized ? 420 : 1500;
+    for (let i = 0; i < darkFlecks; i++) ctx.fillRect(Math.random() * textureSize, Math.random() * textureSize, 1, 1);
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(3.5, 3.5);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    texture.anisotropy = Math.min(mobileOptimized ? 2 : 8, renderer.capabilities.getMaxAnisotropy());
     return texture;
   }
 
   function makeWoodTexture(base, lineColor) {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
+    const textureWidth = mobileOptimized ? 256 : 512;
+    const textureHeight = mobileOptimized ? 64 : 128;
+    canvas.width = textureWidth;
+    canvas.height = textureHeight;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = base;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = lineColor;
     ctx.globalAlpha = .18;
-    for (let y = 7; y < 128; y += 8 + Math.random() * 8) {
+    for (let y = 7; y < textureHeight; y += 8 + Math.random() * 8) {
       ctx.beginPath();
       ctx.moveTo(0, y);
-      for (let x = 0; x <= 512; x += 18) ctx.lineTo(x, y + Math.sin(x * .035 + y) * 2.3);
+      for (let x = 0; x <= textureWidth; x += 18) ctx.lineTo(x, y + Math.sin(x * .035 + y) * 2.3);
       ctx.stroke();
     }
     const texture = new THREE.CanvasTexture(canvas);
@@ -192,25 +204,28 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function makeBallTexture(primary, band, number) {
     const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
+    const textureWidth = mobileOptimized ? 256 : 512;
+    const textureHeight = textureWidth / 2;
+    const textureScale = textureWidth / 512;
+    canvas.width = textureWidth;
+    canvas.height = textureHeight;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = primary;
-    ctx.fillRect(0, 0, 512, 256);
+    ctx.fillRect(0, 0, textureWidth, textureHeight);
     ctx.fillStyle = band;
-    ctx.fillRect(0, 90, 512, 76);
+    ctx.fillRect(0, 90 * textureScale, textureWidth, 76 * textureScale);
     ctx.beginPath();
-    ctx.arc(256, 128, 29, 0, Math.PI * 2);
+    ctx.arc(256 * textureScale, 128 * textureScale, 29 * textureScale, 0, Math.PI * 2);
     ctx.fillStyle = '#f8f5ec';
     ctx.fill();
     ctx.fillStyle = '#171819';
-    ctx.font = '700 34px Arial';
+    ctx.font = `700 ${34 * textureScale}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(String(number), 256, 129);
+    ctx.fillText(String(number), 256 * textureScale, 129 * textureScale);
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    texture.anisotropy = Math.min(mobileOptimized ? 2 : 8, renderer.capabilities.getMaxAnisotropy());
     return texture;
   }
 
@@ -279,7 +294,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
     const key = new THREE.DirectionalLight(config.key, currentScenario === 'rooftop' ? 3.2 : 2.8);
     key.position.set(-8, 16, 7);
-    key.castShadow = true;
+    key.castShadow = renderer.shadowMap.enabled;
     key.shadow.mapSize.set(1024, 1024);
     key.shadow.camera.left = -18;
     key.shadow.camera.right = 18;
@@ -288,9 +303,11 @@ import { SCENARIOS, SETTINGS } from './config.js';
     key.shadow.bias = -.0006;
     lightsRoot.add(key);
 
-    const fill = new THREE.PointLight(config.secondary, currentScenario === 'arcade' ? 28 : 14, 26, 2);
-    fill.position.set(7, 5, -5);
-    lightsRoot.add(fill);
+    if (!mobileOptimized) {
+      const fill = new THREE.PointLight(config.secondary, currentScenario === 'arcade' ? 28 : 14, 26, 2);
+      fill.position.set(7, 5, -5);
+      lightsRoot.add(fill);
+    }
   }
 
   function buildEnvironment(config) {
@@ -392,14 +409,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const railWidth = Math.max(.44, ballWorldRadius * .42);
     const railHeight = Math.max(.38, ballWorldRadius * .48);
     const woodMap = makeWoodTexture(config.rail, config.railEdge);
-    const railMaterial = new THREE.MeshPhysicalMaterial({
-      map: woodMap,
-      color: '#ffffff',
-      roughness: .42,
-      metalness: .08,
-      clearcoat: currentScenario === 'pool' ? .68 : .22,
-      clearcoatRoughness: .24
-    });
+    const railMaterial = mobileOptimized
+      ? new THREE.MeshStandardMaterial({ map: woodMap, color: '#ffffff', roughness: .48, metalness: .06 })
+      : new THREE.MeshPhysicalMaterial({
+        map: woodMap,
+        color: '#ffffff',
+        roughness: .42,
+        metalness: .08,
+        clearcoat: currentScenario === 'pool' ? .68 : .22,
+        clearcoatRoughness: .24
+      });
     const edgeMaterial = new THREE.MeshStandardMaterial({
       color: config.railEdge,
       roughness: currentScenario === 'arcade' ? .2 : .34,
@@ -467,7 +486,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
       shape.holes.push(hole);
     });
 
-    feltMesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 32), feltMaterial);
+    feltMesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, geometryDetail.shape), feltMaterial);
     feltMesh.rotation.x = -Math.PI / 2;
     feltMesh.position.y = .08;
     feltMesh.receiveShadow = true;
@@ -479,20 +498,28 @@ import { SCENARIOS, SETTINGS } from './config.js';
     pockets.forEach(pocket => {
       const root = new THREE.Group();
       const innerMaterial = new THREE.MeshStandardMaterial({ color: '#020303', roughness: .94, metalness: 0 });
-      const rimMaterial = new THREE.MeshPhysicalMaterial({
-        color: config.railEdge,
-        roughness: .3,
-        metalness: .72,
-        clearcoat: .42,
-        emissive: currentScenario === 'arcade' ? config.accent : '#000000',
-        emissiveIntensity: currentScenario === 'arcade' ? 1.2 : 0
-      });
+      const rimMaterial = mobileOptimized
+        ? new THREE.MeshStandardMaterial({
+          color: config.railEdge,
+          roughness: .34,
+          metalness: .62,
+          emissive: currentScenario === 'arcade' ? config.accent : '#000000',
+          emissiveIntensity: currentScenario === 'arcade' ? .8 : 0
+        })
+        : new THREE.MeshPhysicalMaterial({
+          color: config.railEdge,
+          roughness: .3,
+          metalness: .72,
+          clearcoat: .42,
+          emissive: currentScenario === 'arcade' ? config.accent : '#000000',
+          emissiveIntensity: currentScenario === 'arcade' ? 1.2 : 0
+        });
 
-      addMesh(root, new THREE.CylinderGeometry(goalWorldRadius * .84, goalWorldRadius * .72, .55, 48), innerMaterial, {
+      addMesh(root, new THREE.CylinderGeometry(goalWorldRadius * .84, goalWorldRadius * .72, .55, geometryDetail.cylinder), innerMaterial, {
         position: [0, -.19, 0],
         receiveShadow: true
       });
-      addMesh(root, new THREE.TorusGeometry(goalWorldRadius * .86, Math.max(.035, goalWorldRadius * .055), 12, 64), rimMaterial, {
+      addMesh(root, new THREE.TorusGeometry(goalWorldRadius * .86, Math.max(.035, goalWorldRadius * .055), geometryDetail.torusTube, geometryDetail.torusRadial), rimMaterial, {
         position: [0, .105, 0],
         rotation: [Math.PI / 2, 0, 0],
         castShadow: true
@@ -506,14 +533,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
         depthWrite: false,
         blending: THREE.AdditiveBlending
       });
-      pocket.pulse = addMesh(root, new THREE.RingGeometry(goalWorldRadius * .93, goalWorldRadius * 1.02, 64), pulseMaterial, {
+      pocket.pulse = addMesh(root, new THREE.RingGeometry(goalWorldRadius * .93, goalWorldRadius * 1.02, geometryDetail.ring), pulseMaterial, {
         position: [0, .095, 0],
         rotation: [-Math.PI / 2, 0, 0]
       });
 
-      const glow = new THREE.PointLight(config.accent, currentScenario === 'arcade' ? 6 : 2.2, goalWorldRadius * 5, 2);
-      glow.position.set(0, .58, 0);
-      root.add(glow);
+      if (!mobileOptimized) {
+        const glow = new THREE.PointLight(config.accent, currentScenario === 'arcade' ? 6 : 2.2, goalWorldRadius * 5, 2);
+        glow.position.set(0, .58, 0);
+        root.add(glow);
+      }
       pocketRoot.add(root);
       pocket.root = root;
     });
@@ -524,15 +553,18 @@ import { SCENARIOS, SETTINGS } from './config.js';
     clearGroup(ballsRoot);
     balls.forEach((ball, index) => {
       const root = new THREE.Group();
-      const material = new THREE.MeshPhysicalMaterial({
-        map: makeBallTexture(config.ballColors[index % config.ballColors.length], config.ballBand, index + 1),
-        color: '#ffffff',
-        roughness: .18,
-        metalness: .02,
-        clearcoat: 1,
-        clearcoatRoughness: .08
-      });
-      const mesh = addMesh(root, new THREE.SphereGeometry(ballWorldRadius, 40, 28), material, {
+      const ballMap = makeBallTexture(config.ballColors[index % config.ballColors.length], config.ballBand, index + 1);
+      const material = mobileOptimized
+        ? new THREE.MeshStandardMaterial({ map: ballMap, color: '#ffffff', roughness: .24, metalness: .02 })
+        : new THREE.MeshPhysicalMaterial({
+          map: ballMap,
+          color: '#ffffff',
+          roughness: .18,
+          metalness: .02,
+          clearcoat: 1,
+          clearcoatRoughness: .08
+        });
+      const mesh = addMesh(root, new THREE.SphereGeometry(ballWorldRadius, geometryDetail.sphereWidth, geometryDetail.sphereHeight), material, {
         castShadow: true,
         receiveShadow: true
       });
@@ -669,7 +701,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
         frictionAir: SETTINGS.frictionAir,
         density: .0025
       });
-      const ball = { index, body, root: null, mesh: null, state: 'active', scored: false };
+      const ball = { index, body, root: null, mesh: null, state: 'active', scored: false, heading: 0 };
       balls.push(ball);
       ballByBodyId.set(body.id, ball);
       Composite.add(engine.world, body);
@@ -731,6 +763,10 @@ import { SCENARIOS, SETTINGS } from './config.js';
       Body.setPosition(ball.body, positions[index]);
       Body.setVelocity(ball.body, { x: 0, y: 0 });
       Body.setAngularVelocity(ball.body, 0);
+      const targetPocket = pockets[index % Math.max(1, pockets.length)];
+      const targetPosition = targetPocket ? targetPocket.body.position : { x: W / 2, y: H / 2 };
+      ball.heading = Math.atan2(targetPosition.y - positions[index].y, targetPosition.x - positions[index].x)
+        + (Math.random() - .5) * 1.1;
       if (ball.root) {
         ball.root.rotation.set(0, 0, 0);
         ball.root.scale.setScalar(1);
@@ -788,13 +824,23 @@ import { SCENARIOS, SETTINGS } from './config.js';
     return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
   }
 
-  function currentScreenOrientation() {
+  function desiredOrientationType() {
+    return `${selectedOrientation}-primary`;
+  }
+
+  function currentScreenOrientationType() {
     const type = screen.orientation && screen.orientation.type;
-    if (typeof type === 'string') {
-      if (type.startsWith('landscape')) return 'landscape';
-      if (type.startsWith('portrait')) return 'portrait';
-    }
-    return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    if (typeof type === 'string' && /^(portrait|landscape)-(primary|secondary)$/.test(type)) return type;
+
+    const mode = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+    if (typeof window.orientation !== 'number') return `${mode}-primary`;
+    const angle = ((window.orientation % 360) + 360) % 360;
+    if (mode === 'portrait') return angle === 180 ? 'portrait-secondary' : 'portrait-primary';
+    return angle === 270 ? 'landscape-secondary' : 'landscape-primary';
+  }
+
+  function currentScreenOrientation() {
+    return currentScreenOrientationType().startsWith('landscape') ? 'landscape' : 'portrait';
   }
 
   function screenAngle() {
@@ -812,8 +858,11 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   function setStatus(text, active) {
-    statusText.textContent = text;
-    controlStatus.classList.toggle('active', Boolean(active));
+    if (statusText.textContent !== text) statusText.textContent = text;
+    const shouldBeActive = Boolean(active);
+    if (controlStatus.classList.contains('active') !== shouldBeActive) {
+      controlStatus.classList.toggle('active', shouldBeActive);
+    }
   }
 
   function updateOrientationUi() {
@@ -827,19 +876,25 @@ import { SCENARIOS, SETTINGS } from './config.js';
     orientationBtn.dataset.tooltip = `Cambiar a ${nextLabel}`;
     orientationBtn.setAttribute('aria-label', `Orientacion ${currentLabel}. Cambiar a ${nextLabel}`);
     orientationBtn.innerHTML = `<i data-lucide="${isPortrait ? 'rectangle-vertical' : 'rectangle-horizontal'}"></i>`;
-    orientationGuardText.textContent = `Este juego esta configurado para usarse en ${currentLabel}.`;
+    orientationGuardText.textContent = `Usa el dispositivo en ${currentLabel}, siempre del mismo lado.`;
     document.documentElement.dataset.gameOrientation = selectedOrientation;
     initIcons();
   }
 
   function updateOrientationState() {
     const wasMismatched = orientationMismatch;
-    orientationMismatch = started && currentScreenOrientation() !== selectedOrientation;
+    const currentType = currentScreenOrientationType();
+    const sameMode = currentType.startsWith(selectedOrientation);
+    orientationMismatch = started && currentType !== desiredOrientationType();
     orientationGuard.classList.toggle('visible', orientationMismatch);
     orientationGuard.setAttribute('aria-hidden', String(!orientationMismatch));
+    orientationGuardTitle.textContent = sameMode ? 'NO INVIERTAS EL DISPOSITIVO' : 'GIRA TU DISPOSITIVO';
+    orientationGuardText.textContent = sameMode
+      ? `Vuelve al lado principal de la orientacion ${selectedOrientation === 'portrait' ? 'vertical' : 'horizontal'}.`
+      : `Este juego esta fijado en ${selectedOrientation === 'portrait' ? 'vertical' : 'horizontal'}.`;
 
     if (orientationMismatch && !wasMismatched) {
-      setStatus(`GIRA EL DISPOSITIVO A ${selectedOrientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, false);
+      setStatus(sameMode ? 'NO INVIERTAS EL DISPOSITIVO' : `GIRA A ${selectedOrientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, false);
     } else if (!orientationMismatch && wasMismatched) {
       calibrate();
     }
@@ -878,7 +933,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
       if (enterFullscreen && isTouchDevice() && !document.fullscreenElement && document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
       }
-      await screen.orientation.lock(selectedOrientation);
+      await screen.orientation.lock(desiredOrientationType());
       updateOrientationState();
       return true;
     } catch (error) {
@@ -935,15 +990,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (!sensorSeen) {
       sensorSeen = true;
       calibrate();
+      setStatus('INCLINA A LOS LADOS PARA DOBLAR', true);
     }
-    setStatus('SENSOR DE MOVIMIENTO ACTIVO', true);
   }
 
   function calibrate() {
     neutralBeta = rawBeta;
     neutralGamma = rawGamma;
-    smoothX = 0;
-    smoothY = 0;
+    smoothSteering = 0;
     setStatus(sensorSeen ? 'SENSOR CALIBRADO' : 'CONTROL LISTO', sensorSeen);
   }
 
@@ -980,7 +1034,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
     const config = SCENARIOS[currentScenario];
     const pocketPosition = physicsToWorld(pocket.body.position.x, pocket.body.position.y);
-    const count = 34;
+    const count = mobileOptimized ? 20 : 34;
     const positions = new Float32Array(count * 3);
     const velocities = [];
     for (let i = 0; i < count; i++) {
@@ -1012,7 +1066,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
       depthWrite: false,
       blending: THREE.AdditiveBlending
     });
-    const ring = addMesh(effectsRoot, new THREE.RingGeometry(goalWorldRadius * .72, goalWorldRadius * .82, 64), ringMaterial, {
+    const ring = addMesh(effectsRoot, new THREE.RingGeometry(goalWorldRadius * .72, goalWorldRadius * .82, geometryDetail.ring), ringMaterial, {
       position: [pocketPosition.x, .13, pocketPosition.z],
       rotation: [-Math.PI / 2, 0, 0]
     });
@@ -1120,34 +1174,45 @@ import { SCENARIOS, SETTINGS } from './config.js';
     }
   }
 
-  Events.on(engine, 'beforeUpdate', () => {
+  function normalizeSteering(tiltDegrees) {
+    const magnitude = Math.abs(tiltDegrees);
+    if (magnitude <= SETTINGS.steeringDeadZone) return 0;
+    const normalized = clamp(
+      (magnitude - SETTINGS.steeringDeadZone) / (SETTINGS.steeringRange - SETTINGS.steeringDeadZone),
+      0,
+      1
+    );
+    return Math.sign(tiltDegrees) * Math.pow(normalized, SETTINGS.steeringCurve);
+  }
+
+  Events.on(engine, 'beforeUpdate', event => {
     if (!started) return;
-    let targetX = keyboardX;
-    let targetY = keyboardY;
+    let targetSteering = keyboardX;
 
     if (sensorSeen && neutralBeta !== null && neutralGamma !== null) {
       const mapped = mapTilt(rawBeta - neutralBeta, rawGamma - neutralGamma);
-      targetX += clamp(mapped.x, -SETTINGS.maxTiltDegrees, SETTINGS.maxTiltDegrees);
-      targetY += clamp(mapped.y, -SETTINGS.maxTiltDegrees, SETTINGS.maxTiltDegrees);
-    } else {
-      targetX *= 22;
-      targetY *= 22;
+      targetSteering += normalizeSteering(mapped.x);
     }
 
-    smoothX += (targetX - smoothX) * SETTINGS.smoothing;
-    smoothY += (targetY - smoothY) * SETTINGS.smoothing;
+    targetSteering = clamp(targetSteering, -1, 1);
+    const frameScale = clamp((event.delta || 16.67) / 16.67, .5, 2);
+    const steeringBlend = 1 - Math.pow(1 - SETTINGS.steeringSmoothing, frameScale);
+    smoothSteering += (targetSteering - smoothSteering) * steeringBlend;
+
     balls.forEach(ball => {
       if (ball.state !== 'active') return;
-      Body.applyForce(ball.body, ball.body.position, {
-        x: smoothX * SETTINGS.sensitivity * ball.body.mass,
-        y: smoothY * SETTINGS.sensitivity * ball.body.mass
-      });
+      const currentVelocity = ball.body.velocity;
+      const speed = Math.hypot(currentVelocity.x, currentVelocity.y);
+      const currentHeading = speed > .35 ? Math.atan2(currentVelocity.y, currentVelocity.x) : ball.heading;
+      ball.heading = currentHeading + smoothSteering * SETTINGS.turnRate * frameScale;
 
-      const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
-      if (speed > SETTINGS.maxSpeed) {
-        const factor = SETTINGS.maxSpeed / speed;
-        Body.setVelocity(ball.body, { x: ball.body.velocity.x * factor, y: ball.body.velocity.y * factor });
-      }
+      const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
+      const nextSpeed = clamp(lerp(speed, SETTINGS.autoSpeed, accelerationBlend), 0, SETTINGS.maxSpeed);
+      const nextVelocity = {
+        x: Math.cos(ball.heading) * nextSpeed,
+        y: Math.sin(ball.heading) * nextSpeed
+      };
+      Body.setVelocity(ball.body, nextVelocity);
 
       const captureDistance = SETTINGS.goalRadius - SETTINGS.ballRadius * .46;
       const targetPocket = pockets.find(pocket => (
@@ -1200,28 +1265,30 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const vz = ball.body.velocity.y * worldD / H;
     const speed = Math.hypot(vx, vz);
     if (speed < .0001) return;
-    const axis = new THREE.Vector3(vz, 0, -vx).normalize();
+    ballRotationAxis.set(vz, 0, -vx).normalize();
     const angle = speed * deltaSeconds * 62 / Math.max(ballWorldRadius, .001);
-    ball.mesh.rotateOnWorldAxis(axis, angle);
+    ball.mesh.rotateOnWorldAxis(ballRotationAxis, angle);
   }
 
   function animate(now) {
     const delta = Math.min(32, Math.max(0, now - lastFrame));
     lastFrame = now;
-    if (started && !orientationMismatch) Engine.update(engine, delta || 16.67);
-    updateBallVisuals();
-    balls.forEach(ball => rotateBall(ball, delta / 1000));
-    updateCaptures(now);
-    updateEffect(now);
+    if (!orientationMismatch) {
+      if (started) Engine.update(engine, delta || 16.67);
+      updateBallVisuals();
+      balls.forEach(ball => rotateBall(ball, delta / 1000));
+      updateCaptures(now);
+      updateEffect(now);
 
-    pockets.forEach(pocket => {
-      if (!pocket.pulse) return;
-      const pulse = 1 + Math.sin(now * .0035) * .055;
-      pocket.pulse.scale.setScalar(pulse);
-      pocket.pulse.material.opacity = .23 + Math.sin(now * .0035) * .09;
-    });
+      const pulseWave = Math.sin(now * .0035);
+      pockets.forEach(pocket => {
+        if (!pocket.pulse) return;
+        pocket.pulse.scale.setScalar(1 + pulseWave * .055);
+        pocket.pulse.material.opacity = .23 + pulseWave * .09;
+      });
 
-    renderer.render(scene, camera);
+      renderer.render(scene, camera);
+    }
     requestAnimationFrame(animate);
   }
 
@@ -1252,11 +1319,12 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   function resize() {
-    resolveCaptures();
     const previousW = W;
     const previousH = H;
     const nextW = Math.max(320, stage.clientWidth || window.innerWidth);
     const nextH = Math.max(320, stage.clientHeight || window.innerHeight);
+    if (nextW === previousW && nextH === previousH) return;
+    resolveCaptures();
     const ballRatios = balls.map(ball => ({
       x: ball.body.position.x / previousW,
       y: ball.body.position.y / previousH
@@ -1268,7 +1336,6 @@ import { SCENARIOS, SETTINGS } from './config.js';
     W = nextW;
     H = nextH;
     renderer.setSize(W, H, false);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     updateWorldMetrics();
     updateCamera();
     makeWalls();
@@ -1284,29 +1351,38 @@ import { SCENARIOS, SETTINGS } from './config.js';
     buildScenario(currentScenario);
   }
 
+  function scheduleResize(delay = 140, recalibrate = false) {
+    resizeNeedsCalibration = resizeNeedsCalibration || recalibrate;
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      resize();
+      updateOrientationState();
+      if (resizeNeedsCalibration) calibrate();
+      resizeNeedsCalibration = false;
+    }, delay);
+  }
+
   const keys = new Set();
   function updateKeyboard() {
     keyboardX = (keys.has('ArrowRight') || keys.has('KeyD') ? 1 : 0) - (keys.has('ArrowLeft') || keys.has('KeyA') ? 1 : 0);
-    keyboardY = (keys.has('ArrowDown') || keys.has('KeyS') ? 1 : 0) - (keys.has('ArrowUp') || keys.has('KeyW') ? 1 : 0);
   }
 
   window.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(event.code)) return;
     keys.add(event.code);
     updateKeyboard();
-    if (event.code.startsWith('Arrow')) event.preventDefault();
+    event.preventDefault();
   });
   window.addEventListener('keyup', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(event.code)) return;
     keys.delete(event.code);
     updateKeyboard();
   });
 
-  function activeBallCenter() {
+  function activeBallCenterX() {
     const activeBalls = balls.filter(ball => ball.state === 'active');
-    if (!activeBalls.length) return { x: W / 2, y: H / 2 };
-    return activeBalls.reduce((center, ball) => ({
-      x: center.x + ball.body.position.x / activeBalls.length,
-      y: center.y + ball.body.position.y / activeBalls.length
-    }), { x: 0, y: 0 });
+    if (!activeBalls.length) return W / 2;
+    return activeBalls.reduce((center, ball) => center + ball.body.position.x / activeBalls.length, 0);
   }
 
   stage.addEventListener('pointerdown', event => {
@@ -1318,23 +1394,18 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (!pointerActive || sensorSeen) return;
     const rect = stage.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const center = activeBallCenter();
-    keyboardX = clamp((x - center.x) / 170, -1, 1);
-    keyboardY = clamp((y - center.y) / 170, -1, 1);
+    keyboardX = clamp((x - activeBallCenterX()) / 170, -1, 1);
   });
   stage.addEventListener('pointerup', () => {
     pointerActive = false;
     if (!keys.size) {
       keyboardX = 0;
-      keyboardY = 0;
     }
   });
   stage.addEventListener('pointercancel', () => {
     pointerActive = false;
     if (!keys.size) {
       keyboardX = 0;
-      keyboardY = 0;
     }
   });
 
@@ -1390,16 +1461,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
   });
 
   window.addEventListener('resize', () => {
-    resize();
     updateOrientationState();
+    scheduleResize();
   });
-  window.addEventListener('orientationchange', () => window.setTimeout(() => {
-    resize();
+  window.addEventListener('orientationchange', () => {
     updateOrientationState();
-    calibrate();
-  }, 280));
+    scheduleResize(280, true);
+  });
   document.addEventListener('fullscreenchange', () => {
     updateOrientationState();
+    scheduleResize(180, true);
     if (started && document.fullscreenElement && !orientationLockPending) {
       void lockSelectedOrientation({ enterFullscreen: false });
     }
