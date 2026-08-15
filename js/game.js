@@ -874,8 +874,15 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function relativeLateralGravity(x = filteredGravityX, y = filteredGravityY) {
     const neutralMagnitude = Math.hypot(neutralGravityX, neutralGravityY);
-    if (neutralMagnitude < 1) return 0;
-    return (neutralGravityY * x - neutralGravityX * y) / neutralMagnitude;
+    const currentMagnitude = Math.hypot(x, y);
+    if (neutralMagnitude < 1 || currentMagnitude < neutralMagnitude * SETTINGS.gravityUprightRatio) return 0;
+
+    const turnSine = clamp(
+      (neutralGravityY * x - neutralGravityX * y) / (neutralMagnitude * currentMagnitude),
+      -1,
+      1
+    );
+    return turnSine * 9.81;
   }
 
   function setStatus(text, active) {
@@ -1014,7 +1021,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     gravityCalibrationActive = false;
     gravityStability = 0;
     smoothSteering = 0;
-    setStatus('GIRA LA TABLET COMO UN VOLANTE', true);
+    setStatus('SOLO GIRO LATERAL COMO VOLANTE', true);
   }
 
   function onMotion(event) {
@@ -1074,7 +1081,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (!sensorSeen) {
       sensorSeen = true;
       calibrate();
-      setStatus('GIRA LA TABLET COMO UN VOLANTE', true);
+      setStatus('SOLO GIRO LATERAL COMO VOLANTE', true);
     }
   }
 
@@ -1301,9 +1308,13 @@ import { SCENARIOS, SETTINGS } from './config.js';
     return Math.sign(value) * Math.pow(normalized, curve);
   }
 
+  function normalizeAngle(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
+  }
+
   Events.on(engine, 'beforeUpdate', event => {
     if (!started) return;
-    let targetSteering = keyboardX;
+    let targetSteering = mobileOptimized ? 0 : keyboardX;
 
     const motionFresh = motionSeen && performance.now() - lastMotionAt < 1000;
     if (motionFresh) {
@@ -1335,13 +1346,22 @@ import { SCENARIOS, SETTINGS } from './config.js';
       const currentVelocity = ball.body.velocity;
       const speed = Math.hypot(currentVelocity.x, currentVelocity.y);
       const currentHeading = speed > .35 ? Math.atan2(currentVelocity.y, currentVelocity.x) : ball.heading;
-      ball.heading = currentHeading + smoothSteering * SETTINGS.turnRate * frameScale;
+      ball.heading = normalizeAngle(ball.heading + smoothSteering * SETTINGS.turnRate * frameScale);
+
+      const headingError = normalizeAngle(ball.heading - currentHeading);
+      const headingBlend = 1 - Math.pow(1 - SETTINGS.headingResponse, frameScale);
+      const headingCorrection = clamp(
+        headingError * headingBlend,
+        -SETTINGS.maxHeadingCorrection * frameScale,
+        SETTINGS.maxHeadingCorrection * frameScale
+      );
+      const drivenHeading = currentHeading + headingCorrection;
 
       const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
       const nextSpeed = clamp(lerp(speed, SETTINGS.autoSpeed, accelerationBlend), 0, SETTINGS.maxSpeed);
       const nextVelocity = {
-        x: Math.cos(ball.heading) * nextSpeed,
-        y: Math.sin(ball.heading) * nextSpeed
+        x: Math.cos(drivenHeading) * nextSpeed,
+        y: Math.sin(drivenHeading) * nextSpeed
       };
       Body.setVelocity(ball.body, nextVelocity);
 
@@ -1499,12 +1519,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   window.addEventListener('keydown', event => {
+    if (mobileOptimized) return;
     if (!['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(event.code)) return;
     keys.add(event.code);
     updateKeyboard();
     event.preventDefault();
   });
   window.addEventListener('keyup', event => {
+    if (mobileOptimized) return;
     if (!['ArrowLeft', 'ArrowRight', 'KeyA', 'KeyD'].includes(event.code)) return;
     keys.delete(event.code);
     updateKeyboard();
@@ -1517,7 +1539,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   stage.addEventListener('pointerdown', event => {
-    if (!started || sensorSeen || !balls.some(ball => ball.state === 'active')) return;
+    if (mobileOptimized || !started || sensorSeen || !balls.some(ball => ball.state === 'active')) return;
     pointerActive = true;
     stage.setPointerCapture(event.pointerId);
   });
