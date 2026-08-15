@@ -7,8 +7,9 @@ Juego de inclinacion con fisica Matter.js y render 3D Three.js.
 - Control por inclinacion en telefonos y tablets.
 - Flechas, WASD y puntero en escritorio.
 - Entre 1 y 5 pelotas por ronda.
+- Entre 1 y 5 troneras distribuidas en zonas aleatorias.
 - Pool Club, Terraza y Arcade.
-- Tronera movil entre rondas.
+- Las troneras cambian de lugar al completar cada ronda.
 - Colisiones, audio, vibracion y efectos 3D.
 
 ## Desarrollo local

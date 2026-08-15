@@ -138,7 +138,7 @@ button:focus-visible {
   gap: 6px;
 }
 
-.ball-stepper,
+.count-stepper,
 .score-box,
 .tool {
   height: 40px;
@@ -149,7 +149,12 @@ button:focus-visible {
   backdrop-filter: blur(14px);
 }
 
-.ball-stepper {
+.setup-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.count-stepper {
   display: flex;
   align-items: center;
   overflow: hidden;
@@ -182,7 +187,7 @@ button:focus-visible {
   height: 15px;
 }
 
-.ball-count {
+.item-count {
   display: flex;
   min-width: 42px;
   height: 24px;
@@ -194,7 +199,7 @@ button:focus-visible {
   color: var(--accent);
 }
 
-.ball-count strong {
+.item-count strong {
   min-width: 9px;
   color: var(--ink);
   font-size: 14px;
@@ -429,7 +434,7 @@ button:focus-visible {
   line-height: 1.5;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1120px) {
   .topbar {
     grid-template-columns: 1fr auto;
     align-items: start;
@@ -451,7 +456,7 @@ button:focus-visible {
     transform: translateX(-50%);
   }
 
-  .ball-stepper {
+  .setup-controls {
     position: fixed;
     top: calc(var(--safe-top) + 49px);
     right: 14px;
@@ -497,7 +502,7 @@ button:focus-visible {
     display: none;
   }
 
-  .ball-stepper {
+  .setup-controls {
     right: 10px;
   }
 

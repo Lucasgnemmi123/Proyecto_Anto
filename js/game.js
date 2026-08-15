@@ -1,0 +1,1249 @@
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { AudioController } from './audio.js';
+import { SCENARIOS, SETTINGS } from './config.js';
+
+(() => {
+  'use strict';
+
+  if (!window.Matter) {
+    document.getElementById('webglError').style.display = 'grid';
+    return;
+  }
+
+  const { Engine, Bodies, Body, Composite, Events } = window.Matter;
+  const stage = document.getElementById('stage');
+  const intro = document.getElementById('intro');
+  const startBtn = document.getElementById('startBtn');
+  const scoreValue = document.getElementById('scoreValue');
+  const roundLabel = document.getElementById('roundLabel');
+  const ballCountValue = document.getElementById('ballCountValue');
+  const addBallBtn = document.getElementById('addBallBtn');
+  const removeBallBtn = document.getElementById('removeBallBtn');
+  const pocketCountValue = document.getElementById('pocketCountValue');
+  const addPocketBtn = document.getElementById('addPocketBtn');
+  const removePocketBtn = document.getElementById('removePocketBtn');
+  const controlStatus = document.getElementById('controlStatus');
+  const statusText = document.getElementById('statusText');
+  const calibrateBtn = document.getElementById('calibrateBtn');
+  const soundBtn = document.getElementById('soundBtn');
+  const fullscreenBtn = document.getElementById('fullscreenBtn');
+  const resultCallout = document.getElementById('resultCallout');
+  const resultText = document.getElementById('resultText');
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  const audio = new AudioController();
+
+  let W = Math.max(320, window.innerWidth);
+  let H = Math.max(320, window.innerHeight);
+  let worldW = 14;
+  let worldD = worldW * H / W;
+  let ballWorldRadius = SETTINGS.ballRadius * worldW / W;
+  let goalWorldRadius = SETTINGS.goalRadius * worldW / W;
+  let currentScenario = 'pool';
+  let score = 0;
+  let round = 1;
+  let selectedBallCount = 1;
+  let selectedPocketCount = 1;
+  let started = false;
+  let captures = [];
+  let lastFrame = performance.now();
+  let sensorSeen = false;
+  let neutralBeta = null;
+  let neutralGamma = null;
+  let rawBeta = 0;
+  let rawGamma = 0;
+  let smoothX = 0;
+  let smoothY = 0;
+  let keyboardX = 0;
+  let keyboardY = 0;
+  let pointerActive = false;
+  let feltMesh = null;
+  let feltMaterial = null;
+  let activeEffect = null;
+  const balls = [];
+  const pockets = [];
+  const ballByBodyId = new Map();
+
+  const engine = Engine.create({ enableSleeping: false });
+  engine.gravity.x = 0;
+  engine.gravity.y = 0;
+  engine.gravity.scale = 0;
+
+  const initialPocketBody = Bodies.circle(W * .78, H * .34, SETTINGS.goalRadius, {
+    label: 'goal',
+    isStatic: true,
+    isSensor: true,
+    collisionFilter: { mask: 0 }
+  });
+
+  pockets.push({ index: 0, body: initialPocketBody, root: null, pulse: null });
+  Composite.add(engine.world, initialPocketBody);
+  let walls = [];
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, .1, 160);
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+    powerPreference: 'high-performance'
+  });
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(W, H, false);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.08;
+  stage.appendChild(renderer.domElement);
+
+  const environmentRoot = new THREE.Group();
+  const tableRoot = new THREE.Group();
+  const lightsRoot = new THREE.Group();
+  const pocketRoot = new THREE.Group();
+  const ballsRoot = new THREE.Group();
+  const effectsRoot = new THREE.Group();
+  scene.add(environmentRoot, tableRoot, lightsRoot, pocketRoot, ballsRoot, effectsRoot);
+
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const easeInCubic = t => t * t * t;
+
+  function initIcons() {
+    if (window.lucide) window.lucide.createIcons({ attrs: { 'aria-hidden': 'true' } });
+  }
+
+  function disposeMaterial(material) {
+    if (!material) return;
+    Object.keys(material).forEach(key => {
+      const value = material[key];
+      if (value && value.isTexture) value.dispose();
+    });
+    material.dispose();
+  }
+
+  function clearGroup(group) {
+    const children = [...group.children];
+    children.forEach(child => {
+      child.traverse(object => {
+        if (object.geometry) object.geometry.dispose();
+        if (Array.isArray(object.material)) object.material.forEach(disposeMaterial);
+        else if (object.material) disposeMaterial(object.material);
+      });
+      group.remove(child);
+    });
+  }
+
+  function makeNoiseTexture(base, fleck) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, 256, 256);
+    ctx.globalAlpha = .12;
+    ctx.fillStyle = fleck;
+    for (let i = 0; i < 3200; i++) {
+      const size = Math.random() > .92 ? 2 : 1;
+      ctx.fillRect(Math.random() * 256, Math.random() * 256, size, size);
+    }
+    ctx.globalAlpha = .055;
+    ctx.fillStyle = '#000000';
+    for (let i = 0; i < 1500; i++) ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 1);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(3.5, 3.5);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    return texture;
+  }
+
+  function makeWoodTexture(base, lineColor) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = lineColor;
+    ctx.globalAlpha = .18;
+    for (let y = 7; y < 128; y += 8 + Math.random() * 8) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= 512; x += 18) ctx.lineTo(x, y + Math.sin(x * .035 + y) * 2.3);
+      ctx.stroke();
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2.5, 1);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+  }
+
+  function makeBallTexture(primary, band, number) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = primary;
+    ctx.fillRect(0, 0, 512, 256);
+    ctx.fillStyle = band;
+    ctx.fillRect(0, 90, 512, 76);
+    ctx.beginPath();
+    ctx.arc(256, 128, 29, 0, Math.PI * 2);
+    ctx.fillStyle = '#f8f5ec';
+    ctx.fill();
+    ctx.fillStyle = '#171819';
+    ctx.font = '700 34px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(number), 256, 129);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    return texture;
+  }
+
+  function addMesh(root, geometry, material, options = {}) {
+    const mesh = new THREE.Mesh(geometry, material);
+    if (options.position) mesh.position.set(...options.position);
+    if (options.rotation) mesh.rotation.set(...options.rotation);
+    if (options.scale) mesh.scale.set(...options.scale);
+    mesh.castShadow = Boolean(options.castShadow);
+    mesh.receiveShadow = Boolean(options.receiveShadow);
+    root.add(mesh);
+    return mesh;
+  }
+
+  function physicsToWorld(x, y) {
+    return {
+      x: (x / W - .5) * worldW,
+      z: (y / H - .5) * worldD
+    };
+  }
+
+  function updateWorldMetrics() {
+    worldW = 14;
+    worldD = worldW * H / W;
+    ballWorldRadius = SETTINGS.ballRadius * worldW / W;
+    goalWorldRadius = SETTINGS.goalRadius * worldW / W;
+  }
+
+  function updateCamera() {
+    const aspect = W / H;
+    const margin = Math.max(1.8, ballWorldRadius * 2.2);
+    const visibleHeight = Math.max(worldD + margin, (worldW + margin) / aspect);
+    camera.left = -visibleHeight * aspect * .5;
+    camera.right = visibleHeight * aspect * .5;
+    camera.top = visibleHeight * .5;
+    camera.bottom = -visibleHeight * .5;
+    camera.near = .1;
+    camera.far = 160;
+    const span = Math.max(worldW, worldD);
+    camera.position.set(0, span * 1.8, span * .42);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }
+
+  function makeWalls() {
+    walls.forEach(wall => Composite.remove(engine.world, wall));
+    const t = SETTINGS.wallThickness;
+    const wallOptions = {
+      isStatic: true,
+      restitution: SETTINGS.wallRestitution,
+      friction: 0
+    };
+    walls = [
+      Bodies.rectangle(W / 2, -t / 2, W + t * 2, t, { ...wallOptions, label: 'wall-top' }),
+      Bodies.rectangle(W / 2, H + t / 2, W + t * 2, t, { ...wallOptions, label: 'wall-bottom' }),
+      Bodies.rectangle(-t / 2, H / 2, t, H + t * 2, { ...wallOptions, label: 'wall-left' }),
+      Bodies.rectangle(W + t / 2, H / 2, t, H + t * 2, { ...wallOptions, label: 'wall-right' })
+    ];
+    Composite.add(engine.world, walls);
+  }
+
+  function buildLights(config) {
+    clearGroup(lightsRoot);
+    const hemisphere = new THREE.HemisphereLight(config.ambient, config.base, currentScenario === 'arcade' ? 1.35 : 1.65);
+    lightsRoot.add(hemisphere);
+
+    const key = new THREE.DirectionalLight(config.key, currentScenario === 'rooftop' ? 3.2 : 2.8);
+    key.position.set(-8, 16, 7);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.left = -18;
+    key.shadow.camera.right = 18;
+    key.shadow.camera.top = 24;
+    key.shadow.camera.bottom = -24;
+    key.shadow.bias = -.0006;
+    lightsRoot.add(key);
+
+    const fill = new THREE.PointLight(config.secondary, currentScenario === 'arcade' ? 28 : 14, 26, 2);
+    fill.position.set(7, 5, -5);
+    lightsRoot.add(fill);
+  }
+
+  function buildEnvironment(config) {
+    clearGroup(environmentRoot);
+    scene.background = new THREE.Color(config.background);
+    const span = Math.max(worldW, worldD);
+    scene.fog = new THREE.Fog(
+      config.background,
+      Math.max(config.fog * .45, span * .9),
+      Math.max(config.fog, span * 3.2)
+    );
+    renderer.setClearColor(config.background, 1);
+
+    const floorSize = Math.max(56, worldD * 2.4);
+    const floorMaterial = new THREE.MeshStandardMaterial({ color: config.floor, roughness: .91, metalness: .02 });
+    addMesh(environmentRoot, new THREE.PlaneGeometry(floorSize, floorSize), floorMaterial, {
+      position: [0, -.52, 0],
+      rotation: [-Math.PI / 2, 0, 0],
+      receiveShadow: true
+    });
+
+    if (currentScenario === 'pool') buildPoolDecor(config);
+    if (currentScenario === 'rooftop') buildRooftopDecor(config);
+    if (currentScenario === 'arcade') buildArcadeDecor(config, floorSize);
+  }
+
+  function buildPoolDecor(config) {
+    const metal = new THREE.MeshStandardMaterial({ color: config.railEdge, roughness: .28, metalness: .78 });
+    const positions = [
+      [-worldW / 2 - .54, -worldD / 2 - .54],
+      [worldW / 2 + .54, -worldD / 2 - .54],
+      [-worldW / 2 - .54, worldD / 2 + .54],
+      [worldW / 2 + .54, worldD / 2 + .54]
+    ];
+    positions.forEach(([x, z]) => {
+      addMesh(environmentRoot, new THREE.CylinderGeometry(.16, .2, .72, 16), metal, {
+        position: [x, -.18, z],
+        castShadow: true
+      });
+    });
+  }
+
+  function buildRooftopDecor(config) {
+    const planterMaterial = new THREE.MeshStandardMaterial({ color: '#665d55', roughness: .84 });
+    const leafMaterial = new THREE.MeshStandardMaterial({ color: '#315c42', roughness: .88 });
+    const zPositions = [-worldD * .28, worldD * .28];
+    zPositions.forEach(z => {
+      [-1, 1].forEach(side => {
+        const x = side * (worldW / 2 + 1.15);
+        addMesh(environmentRoot, new THREE.BoxGeometry(.9, .54, 1.3), planterMaterial, {
+          position: [x, -.23, z],
+          castShadow: true,
+          receiveShadow: true
+        });
+        for (let i = 0; i < 3; i++) {
+          addMesh(environmentRoot, new THREE.IcosahedronGeometry(.38 + i * .025, 1), leafMaterial, {
+            position: [x + (i - 1) * .22, .18 + (i % 2) * .12, z + (i - 1) * .18],
+            castShadow: true
+          });
+        }
+      });
+    });
+  }
+
+  function buildArcadeDecor(config, floorSize) {
+    const grid = new THREE.GridHelper(floorSize, 32, config.accent, config.secondary);
+    grid.position.y = -.49;
+    grid.material.transparent = true;
+    grid.material.opacity = .19;
+    environmentRoot.add(grid);
+
+    const neonA = new THREE.MeshBasicMaterial({ color: config.accent });
+    const neonB = new THREE.MeshBasicMaterial({ color: config.secondary });
+    [-1, 1].forEach(side => {
+      addMesh(environmentRoot, new THREE.BoxGeometry(.055, .055, worldD * .78), side > 0 ? neonA : neonB, {
+        position: [side * (worldW / 2 + .9), -.36, 0]
+      });
+    });
+  }
+
+  function buildTable(config) {
+    clearGroup(tableRoot);
+    feltMesh = null;
+    feltMaterial = new THREE.MeshStandardMaterial({
+      map: makeNoiseTexture(config.surface, config.surfaceFleck),
+      color: '#ffffff',
+      roughness: .96,
+      metalness: 0,
+      side: THREE.DoubleSide
+    });
+
+    const baseMaterial = new THREE.MeshStandardMaterial({ color: config.base, roughness: .58, metalness: .14 });
+    addMesh(tableRoot, new THREE.BoxGeometry(worldW + 1.18, .48, worldD + 1.18), baseMaterial, {
+      position: [0, -.18, 0],
+      castShadow: true,
+      receiveShadow: true
+    });
+
+    const railWidth = Math.max(.44, ballWorldRadius * .42);
+    const railHeight = Math.max(.38, ballWorldRadius * .48);
+    const woodMap = makeWoodTexture(config.rail, config.railEdge);
+    const railMaterial = new THREE.MeshPhysicalMaterial({
+      map: woodMap,
+      color: '#ffffff',
+      roughness: .42,
+      metalness: .08,
+      clearcoat: currentScenario === 'pool' ? .68 : .22,
+      clearcoatRoughness: .24
+    });
+    const edgeMaterial = new THREE.MeshStandardMaterial({
+      color: config.railEdge,
+      roughness: currentScenario === 'arcade' ? .2 : .34,
+      metalness: currentScenario === 'arcade' ? .4 : .7,
+      emissive: currentScenario === 'arcade' ? config.railEdge : '#000000',
+      emissiveIntensity: currentScenario === 'arcade' ? 1.7 : 0
+    });
+
+    const railY = .11 + railHeight / 2;
+    addMesh(tableRoot, new THREE.BoxGeometry(worldW + railWidth * 2, railHeight, railWidth), railMaterial, {
+      position: [0, railY, -worldD / 2 - railWidth / 2],
+      castShadow: true,
+      receiveShadow: true
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(worldW + railWidth * 2, railHeight, railWidth), railMaterial, {
+      position: [0, railY, worldD / 2 + railWidth / 2],
+      castShadow: true,
+      receiveShadow: true
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(railWidth, railHeight, worldD), railMaterial, {
+      position: [-worldW / 2 - railWidth / 2, railY, 0],
+      castShadow: true,
+      receiveShadow: true
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(railWidth, railHeight, worldD), railMaterial, {
+      position: [worldW / 2 + railWidth / 2, railY, 0],
+      castShadow: true,
+      receiveShadow: true
+    });
+
+    const strip = .055;
+    const stripY = railY + railHeight / 2 + .012;
+    addMesh(tableRoot, new THREE.BoxGeometry(worldW, .025, strip), edgeMaterial, {
+      position: [0, stripY, -worldD / 2 - .06]
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(worldW, .025, strip), edgeMaterial, {
+      position: [0, stripY, worldD / 2 + .06]
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(strip, .025, worldD), edgeMaterial, {
+      position: [-worldW / 2 - .06, stripY, 0]
+    });
+    addMesh(tableRoot, new THREE.BoxGeometry(strip, .025, worldD), edgeMaterial, {
+      position: [worldW / 2 + .06, stripY, 0]
+    });
+
+    rebuildSurface();
+  }
+
+  function rebuildSurface() {
+    if (feltMesh) {
+      feltMesh.geometry.dispose();
+      tableRoot.remove(feltMesh);
+    }
+    const shape = new THREE.Shape();
+    shape.moveTo(-worldW / 2, -worldD / 2);
+    shape.lineTo(worldW / 2, -worldD / 2);
+    shape.lineTo(worldW / 2, worldD / 2);
+    shape.lineTo(-worldW / 2, worldD / 2);
+    shape.closePath();
+
+    pockets.forEach(pocket => {
+      const position = physicsToWorld(pocket.body.position.x, pocket.body.position.y);
+      const hole = new THREE.Path();
+      hole.absarc(position.x, -position.z, goalWorldRadius * .84, 0, Math.PI * 2, true);
+      shape.holes.push(hole);
+    });
+
+    feltMesh = new THREE.Mesh(new THREE.ShapeGeometry(shape, 32), feltMaterial);
+    feltMesh.rotation.x = -Math.PI / 2;
+    feltMesh.position.y = .08;
+    feltMesh.receiveShadow = true;
+    tableRoot.add(feltMesh);
+  }
+
+  function buildPockets(config) {
+    clearGroup(pocketRoot);
+    pockets.forEach(pocket => {
+      const root = new THREE.Group();
+      const innerMaterial = new THREE.MeshStandardMaterial({ color: '#020303', roughness: .94, metalness: 0 });
+      const rimMaterial = new THREE.MeshPhysicalMaterial({
+        color: config.railEdge,
+        roughness: .3,
+        metalness: .72,
+        clearcoat: .42,
+        emissive: currentScenario === 'arcade' ? config.accent : '#000000',
+        emissiveIntensity: currentScenario === 'arcade' ? 1.2 : 0
+      });
+
+      addMesh(root, new THREE.CylinderGeometry(goalWorldRadius * .84, goalWorldRadius * .72, .55, 48), innerMaterial, {
+        position: [0, -.19, 0],
+        receiveShadow: true
+      });
+      addMesh(root, new THREE.TorusGeometry(goalWorldRadius * .86, Math.max(.035, goalWorldRadius * .055), 12, 64), rimMaterial, {
+        position: [0, .105, 0],
+        rotation: [Math.PI / 2, 0, 0],
+        castShadow: true
+      });
+
+      const pulseMaterial = new THREE.MeshBasicMaterial({
+        color: config.accent,
+        transparent: true,
+        opacity: .35,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      pocket.pulse = addMesh(root, new THREE.RingGeometry(goalWorldRadius * .93, goalWorldRadius * 1.02, 64), pulseMaterial, {
+        position: [0, .095, 0],
+        rotation: [-Math.PI / 2, 0, 0]
+      });
+
+      const glow = new THREE.PointLight(config.accent, currentScenario === 'arcade' ? 6 : 2.2, goalWorldRadius * 5, 2);
+      glow.position.set(0, .58, 0);
+      root.add(glow);
+      pocketRoot.add(root);
+      pocket.root = root;
+    });
+    updatePocketVisuals();
+  }
+
+  function buildBalls(config) {
+    clearGroup(ballsRoot);
+    balls.forEach((ball, index) => {
+      const root = new THREE.Group();
+      const material = new THREE.MeshPhysicalMaterial({
+        map: makeBallTexture(config.ballColors[index % config.ballColors.length], config.ballBand, index + 1),
+        color: '#ffffff',
+        roughness: .18,
+        metalness: .02,
+        clearcoat: 1,
+        clearcoatRoughness: .08
+      });
+      const mesh = addMesh(root, new THREE.SphereGeometry(ballWorldRadius, 40, 28), material, {
+        castShadow: true,
+        receiveShadow: true
+      });
+      mesh.rotation.y = -.9 + index * .34;
+      mesh.rotation.z = .18;
+      ballsRoot.add(root);
+      ball.root = root;
+      ball.mesh = mesh;
+      root.visible = ball.state !== 'pocketed';
+      root.scale.setScalar(1);
+      updateBallVisual(ball);
+    });
+  }
+
+  function updatePocketVisuals() {
+    pockets.forEach(pocket => {
+      if (!pocket.root) return;
+      const position = physicsToWorld(pocket.body.position.x, pocket.body.position.y);
+      pocket.root.position.set(position.x, 0, position.z);
+    });
+    rebuildSurface();
+  }
+
+  function updateBallVisual(ball) {
+    if (!ball.mesh || ball.state !== 'active') return;
+    const position = physicsToWorld(ball.body.position.x, ball.body.position.y);
+    ball.root.position.set(position.x, .08 + ballWorldRadius, position.z);
+  }
+
+  function updateBallVisuals() {
+    balls.forEach(updateBallVisual);
+  }
+
+  function updateScenarioUi(config) {
+    document.documentElement.style.setProperty('--accent', config.accent);
+    document.documentElement.style.setProperty('--accent-rgb', config.accentRgb);
+    themeMeta.setAttribute('content', config.background);
+    document.querySelectorAll('.scene-tab').forEach(button => {
+      button.setAttribute('aria-selected', String(button.dataset.scene === currentScenario));
+    });
+  }
+
+  function buildScenario(sceneId) {
+    currentScenario = sceneId;
+    const config = SCENARIOS[currentScenario];
+    updateScenarioUi(config);
+    buildLights(config);
+    buildEnvironment(config);
+    buildTable(config);
+    buildPockets(config);
+    buildBalls(config);
+  }
+
+  function makePocketPositions(count, previousPositions = []) {
+    const positions = [];
+    const margin = SETTINGS.goalRadius + 14;
+    const spanX = Math.max(1, W - margin * 2);
+    const spanY = Math.max(1, H - margin * 2);
+    const preferredGap = SETTINGS.goalRadius * 2.12;
+    const minimumGap = SETTINGS.goalRadius * 1.68;
+    const movementGap = SETTINGS.goalRadius * 1.25;
+
+    for (let index = 0; index < count; index++) {
+      let candidate = null;
+      let bestCandidate = null;
+      let bestClearance = -Infinity;
+
+      for (let tries = 0; tries < 520; tries++) {
+        const test = {
+          x: margin + Math.random() * spanX,
+          y: margin + Math.random() * spanY
+        };
+        const clearance = positions.length
+          ? Math.min(...positions.map(position => Math.hypot(test.x - position.x, test.y - position.y)))
+          : Infinity;
+        if (clearance > bestClearance) {
+          bestClearance = clearance;
+          bestCandidate = test;
+        }
+
+        const relaxedGap = lerp(preferredGap, minimumGap, clamp((tries - 220) / 300, 0, 1));
+        const clearOfPockets = positions.every(position => (
+          Math.hypot(test.x - position.x, test.y - position.y) >= relaxedGap
+        ));
+        const movedFromPrevious = tries > 360 || previousPositions.every(position => (
+          Math.hypot(test.x - position.x, test.y - position.y) >= movementGap
+        ));
+        if (clearOfPockets && movedFromPrevious) {
+          candidate = test;
+          break;
+        }
+      }
+
+      positions.push(candidate || bestCandidate || { x: W / 2, y: H / 2 });
+    }
+    return positions;
+  }
+
+  function createPocketBodies(count) {
+    const previousPositions = pockets.map(pocket => ({ ...pocket.body.position }));
+    pockets.forEach(pocket => Composite.remove(engine.world, pocket.body));
+    pockets.length = 0;
+    const positions = makePocketPositions(count, previousPositions);
+
+    positions.forEach((position, index) => {
+      const body = Bodies.circle(position.x, position.y, SETTINGS.goalRadius, {
+        label: 'goal',
+        isStatic: true,
+        isSensor: true,
+        collisionFilter: { mask: 0 }
+      });
+      pockets.push({ index, body, root: null, pulse: null });
+      Composite.add(engine.world, body);
+    });
+  }
+
+  function chooseNextPockets() {
+    const previousPositions = pockets.map(pocket => ({ ...pocket.body.position }));
+    const positions = makePocketPositions(pockets.length, previousPositions);
+    pockets.forEach((pocket, index) => Body.setPosition(pocket.body, positions[index]));
+    updatePocketVisuals();
+  }
+
+  function createBallBodies(count) {
+    balls.forEach(ball => Composite.remove(engine.world, ball.body));
+    balls.length = 0;
+    ballByBodyId.clear();
+
+    for (let index = 0; index < count; index++) {
+      const body = Bodies.circle(W * .25, H * .5, SETTINGS.ballRadius, {
+        label: 'ball',
+        restitution: SETTINGS.restitution,
+        friction: .018,
+        frictionAir: SETTINGS.frictionAir,
+        density: .0025
+      });
+      const ball = { index, body, root: null, mesh: null, state: 'active', scored: false };
+      balls.push(ball);
+      ballByBodyId.set(body.id, ball);
+      Composite.add(engine.world, body);
+    }
+    resetBalls();
+  }
+
+  function makeSpawnPositions(count) {
+    const positions = [];
+    const margin = SETTINGS.ballRadius + 18;
+    const minimumGap = SETTINGS.ballRadius * 2.25;
+    const minimumGoalGap = SETTINGS.goalRadius + SETTINGS.ballRadius + 24;
+    const pocketCenterX = pockets.reduce((total, pocket) => total + pocket.body.position.x, 0) / Math.max(1, pockets.length);
+    const pocketsOnRight = pocketCenterX >= W / 2;
+
+    for (let index = 0; index < count; index++) {
+      let candidate = null;
+      for (let tries = 0; tries < 140; tries++) {
+        const preferOppositeSide = tries < 95;
+        const minX = pocketsOnRight || !preferOppositeSide ? margin : W * .52;
+        const maxX = pocketsOnRight && preferOppositeSide ? W * .48 : W - margin;
+        const safeMinX = Math.min(minX, maxX - 1);
+        const safeMaxX = Math.max(maxX, safeMinX + 1);
+        const test = {
+          x: safeMinX + Math.random() * (safeMaxX - safeMinX),
+          y: margin + Math.random() * Math.max(1, H - margin * 2)
+        };
+        const clearOfPockets = pockets.every(pocket => (
+          Math.hypot(test.x - pocket.body.position.x, test.y - pocket.body.position.y) >= minimumGoalGap
+        ));
+        const clearOfBalls = positions.every(position => Math.hypot(test.x - position.x, test.y - position.y) >= minimumGap);
+        if (clearOfPockets && clearOfBalls) {
+          candidate = test;
+          break;
+        }
+      }
+
+      if (!candidate) {
+        const angle = index / Math.max(1, count) * Math.PI * 2;
+        const centerX = pocketsOnRight ? W * .28 : W * .72;
+        candidate = {
+          x: clamp(centerX + Math.cos(angle) * minimumGap, margin, W - margin),
+          y: clamp(H * .5 + Math.sin(angle) * minimumGap, margin, H - margin)
+        };
+      }
+      positions.push(candidate);
+    }
+    return positions;
+  }
+
+  function resetBalls() {
+    captures = [];
+    const positions = makeSpawnPositions(balls.length);
+    balls.forEach((ball, index) => {
+      ball.state = 'active';
+      ball.scored = false;
+      ball.body.collisionFilter.mask = 0xFFFFFFFF;
+      Body.setStatic(ball.body, false);
+      Body.setPosition(ball.body, positions[index]);
+      Body.setVelocity(ball.body, { x: 0, y: 0 });
+      Body.setAngularVelocity(ball.body, 0);
+      if (ball.root) {
+        ball.root.rotation.set(0, 0, 0);
+        ball.root.scale.setScalar(1);
+        ball.root.visible = true;
+      }
+      updateBallVisual(ball);
+    });
+  }
+
+  function updateBallCountUi() {
+    ballCountValue.textContent = String(selectedBallCount);
+    removeBallBtn.disabled = selectedBallCount <= 1;
+    addBallBtn.disabled = selectedBallCount >= SETTINGS.maxBalls;
+    roundLabel.textContent = `RONDA ${String(round).padStart(2, '0')}`;
+  }
+
+  function updatePocketCountUi() {
+    pocketCountValue.textContent = String(selectedPocketCount);
+    removePocketBtn.disabled = selectedPocketCount <= 1;
+    addPocketBtn.disabled = selectedPocketCount >= SETTINGS.maxPockets;
+  }
+
+  function setBallCount(count) {
+    const nextCount = clamp(count, 1, SETTINGS.maxBalls);
+    if (nextCount === selectedBallCount) return;
+    selectedBallCount = nextCount;
+    captures = [];
+    createBallBodies(selectedBallCount);
+    buildBalls(SCENARIOS[currentScenario]);
+    updateBallCountUi();
+    const noun = selectedBallCount === 1 ? 'PELOTA' : 'PELOTAS';
+    setStatus(`${selectedBallCount} ${noun} EN ESTA RONDA`, sensorSeen);
+  }
+
+  function setPocketCount(count) {
+    const nextCount = clamp(count, 1, SETTINGS.maxPockets);
+    if (nextCount === selectedPocketCount) return;
+    selectedPocketCount = nextCount;
+    captures = [];
+    createPocketBodies(selectedPocketCount);
+    resetBalls();
+    buildPockets(SCENARIOS[currentScenario]);
+    updatePocketCountUi();
+    const noun = selectedPocketCount === 1 ? 'TRONERA' : 'TRONERAS';
+    setStatus(`${selectedPocketCount} ${noun} EN ZONAS ALEATORIAS`, sensorSeen);
+  }
+
+  function screenAngle() {
+    if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+    return typeof window.orientation === 'number' ? window.orientation : 0;
+  }
+
+  function mapTilt(betaDelta, gammaDelta) {
+    const angle = ((screenAngle() % 360) + 360) % 360;
+    if (angle === 90) return { x: -betaDelta, y: gammaDelta };
+    if (angle === 270) return { x: betaDelta, y: -gammaDelta };
+    if (angle === 180) return { x: -gammaDelta, y: -betaDelta };
+    return { x: gammaDelta, y: betaDelta };
+  }
+
+  function setStatus(text, active) {
+    statusText.textContent = text;
+    controlStatus.classList.toggle('active', Boolean(active));
+  }
+
+  function onOrientation(event) {
+    if (typeof event.beta !== 'number' || typeof event.gamma !== 'number') return;
+    rawBeta = event.beta;
+    rawGamma = event.gamma;
+    if (!sensorSeen) {
+      sensorSeen = true;
+      calibrate();
+    }
+    setStatus('SENSOR DE MOVIMIENTO ACTIVO', true);
+  }
+
+  function calibrate() {
+    neutralBeta = rawBeta;
+    neutralGamma = rawGamma;
+    smoothX = 0;
+    smoothY = 0;
+    setStatus(sensorSeen ? 'SENSOR CALIBRADO' : 'CONTROL LISTO', sensorSeen);
+  }
+
+  async function enableSensor() {
+    if (typeof DeviceOrientationEvent === 'undefined') return false;
+    try {
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const result = await DeviceOrientationEvent.requestPermission();
+        if (result !== 'granted') return false;
+      }
+      window.addEventListener('deviceorientation', onOrientation, true);
+      setStatus('BUSCANDO SENSOR DE MOVIMIENTO', false);
+      window.setTimeout(() => {
+        if (!sensorSeen) setStatus('CONTROL LISTO', false);
+      }, 1600);
+      return true;
+    } catch (error) {
+      console.warn('Sensor no disponible:', error);
+      setStatus('CONTROL LISTO', false);
+      return false;
+    }
+  }
+
+  function triggerEffect(pocket, now) {
+    if (activeEffect) {
+      effectsRoot.remove(activeEffect.points, activeEffect.ring);
+      activeEffect.points.geometry.dispose();
+      activeEffect.points.material.dispose();
+      activeEffect.ring.geometry.dispose();
+      activeEffect.ring.material.dispose();
+    }
+
+    const config = SCENARIOS[currentScenario];
+    const pocketPosition = physicsToWorld(pocket.body.position.x, pocket.body.position.y);
+    const count = 34;
+    const positions = new Float32Array(count * 3);
+    const velocities = [];
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = pocketPosition.x;
+      positions[i * 3 + 1] = .18;
+      positions[i * 3 + 2] = pocketPosition.z;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = .9 + Math.random() * 2;
+      velocities.push(new THREE.Vector3(Math.cos(angle) * speed, 1.4 + Math.random() * 2.4, Math.sin(angle) * speed));
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const material = new THREE.PointsMaterial({
+      color: config.accent,
+      size: Math.max(.075, ballWorldRadius * .16),
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const points = new THREE.Points(geometry, material);
+    effectsRoot.add(points);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: config.secondary,
+      transparent: true,
+      opacity: .72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const ring = addMesh(effectsRoot, new THREE.RingGeometry(goalWorldRadius * .72, goalWorldRadius * .82, 64), ringMaterial, {
+      position: [pocketPosition.x, .13, pocketPosition.z],
+      rotation: [-Math.PI / 2, 0, 0]
+    });
+    activeEffect = { points, ring, velocities, start: now };
+  }
+
+  function updateEffect(now) {
+    if (!activeEffect) return;
+    const elapsed = (now - activeEffect.start) / 1000;
+    const positions = activeEffect.points.geometry.attributes.position.array;
+    activeEffect.velocities.forEach((velocity, i) => {
+      positions[i * 3] += velocity.x * .016;
+      positions[i * 3 + 1] += velocity.y * .016;
+      positions[i * 3 + 2] += velocity.z * .016;
+      velocity.y -= 4.8 * .016;
+    });
+    activeEffect.points.geometry.attributes.position.needsUpdate = true;
+    activeEffect.points.material.opacity = clamp(1 - elapsed / .86, 0, 1);
+    const ringScale = 1 + easeOutCubic(clamp(elapsed / .7, 0, 1)) * 2.1;
+    activeEffect.ring.scale.setScalar(ringScale);
+    activeEffect.ring.material.opacity = clamp(.72 * (1 - elapsed / .72), 0, .72);
+    if (elapsed > .9) {
+      effectsRoot.remove(activeEffect.points, activeEffect.ring);
+      activeEffect.points.geometry.dispose();
+      activeEffect.points.material.dispose();
+      activeEffect.ring.geometry.dispose();
+      activeEffect.ring.material.dispose();
+      activeEffect = null;
+    }
+  }
+
+  function showResult() {
+    resultCallout.classList.remove('show');
+    void resultCallout.offsetWidth;
+    resultCallout.classList.add('show');
+  }
+
+  function commitScore(capture, now) {
+    if (capture.scored) return;
+    capture.scored = true;
+    capture.ball.scored = true;
+    score += 1;
+    scoreValue.textContent = String(score).padStart(2, '0');
+    const remaining = balls.filter(ball => !ball.scored).length;
+    resultText.textContent = remaining === 0
+      ? 'RONDA COMPLETA'
+      : `EMBOCADA - QUEDAN ${remaining}`;
+    showResult();
+    triggerEffect(capture.pocket, now);
+    audio.playPocket();
+    if (navigator.vibrate) navigator.vibrate([32, 24, 48]);
+  }
+
+  function beginCapture(ball, pocket, now) {
+    if (ball.state !== 'active') return;
+    ball.state = 'capturing';
+    const capture = {
+      ball,
+      pocket,
+      start: now,
+      scored: false,
+      from: physicsToWorld(ball.body.position.x, ball.body.position.y)
+    };
+    captures.push(capture);
+    Body.setVelocity(ball.body, { x: 0, y: 0 });
+    Body.setAngularVelocity(ball.body, 0);
+    Body.setStatic(ball.body, true);
+    ball.body.collisionFilter.mask = 0;
+  }
+
+  function updateCaptures(now) {
+    if (!captures.length) return;
+    const completed = [];
+
+    captures.forEach(capture => {
+      const pocket = physicsToWorld(capture.pocket.body.position.x, capture.pocket.body.position.y);
+      const elapsed = now - capture.start;
+      const pull = easeOutCubic(clamp(elapsed / 310, 0, 1));
+      const drop = easeInCubic(clamp((elapsed - 210) / 610, 0, 1));
+      const { ball } = capture;
+      ball.root.position.x = lerp(capture.from.x, pocket.x, pull);
+      ball.root.position.z = lerp(capture.from.z, pocket.z, pull);
+      ball.root.position.y = .08 + ballWorldRadius - drop * (ballWorldRadius * 2.65 + .26);
+      const scale = 1 - drop * .62;
+      ball.root.scale.setScalar(Math.max(.28, scale));
+      ball.root.rotation.y += .055;
+      ball.root.rotation.x += .03;
+
+      if (elapsed > 390) commitScore(capture, now);
+      if (elapsed >= SETTINGS.captureDuration) {
+        ball.state = 'pocketed';
+        ball.root.visible = false;
+        completed.push(capture);
+      }
+    });
+
+    if (completed.length) {
+      captures = captures.filter(capture => !completed.includes(capture));
+    }
+    if (balls.length && balls.every(ball => ball.state === 'pocketed')) {
+      round += 1;
+      chooseNextPockets();
+      resetBalls();
+      updateBallCountUi();
+    }
+  }
+
+  Events.on(engine, 'beforeUpdate', () => {
+    if (!started) return;
+    let targetX = keyboardX;
+    let targetY = keyboardY;
+
+    if (sensorSeen && neutralBeta !== null && neutralGamma !== null) {
+      const mapped = mapTilt(rawBeta - neutralBeta, rawGamma - neutralGamma);
+      targetX += clamp(mapped.x, -SETTINGS.maxTiltDegrees, SETTINGS.maxTiltDegrees);
+      targetY += clamp(mapped.y, -SETTINGS.maxTiltDegrees, SETTINGS.maxTiltDegrees);
+    } else {
+      targetX *= 22;
+      targetY *= 22;
+    }
+
+    smoothX += (targetX - smoothX) * SETTINGS.smoothing;
+    smoothY += (targetY - smoothY) * SETTINGS.smoothing;
+    balls.forEach(ball => {
+      if (ball.state !== 'active') return;
+      Body.applyForce(ball.body, ball.body.position, {
+        x: smoothX * SETTINGS.sensitivity * ball.body.mass,
+        y: smoothY * SETTINGS.sensitivity * ball.body.mass
+      });
+
+      const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
+      if (speed > SETTINGS.maxSpeed) {
+        const factor = SETTINGS.maxSpeed / speed;
+        Body.setVelocity(ball.body, { x: ball.body.velocity.x * factor, y: ball.body.velocity.y * factor });
+      }
+
+      const captureDistance = SETTINGS.goalRadius - SETTINGS.ballRadius * .46;
+      const targetPocket = pockets.find(pocket => (
+        Math.hypot(ball.body.position.x - pocket.body.position.x, ball.body.position.y - pocket.body.position.y) < captureDistance
+      ));
+      if (targetPocket) beginCapture(ball, targetPocket, performance.now());
+    });
+  });
+
+  Events.on(engine, 'collisionStart', event => {
+    event.pairs.forEach(pair => {
+      const firstBall = ballByBodyId.get(pair.bodyA.id);
+      const secondBall = ballByBodyId.get(pair.bodyB.id);
+      if (firstBall?.state === 'active' && secondBall?.state === 'active') {
+        const relativeSpeed = Math.hypot(
+          pair.bodyA.velocity.x - pair.bodyB.velocity.x,
+          pair.bodyA.velocity.y - pair.bodyB.velocity.y
+        );
+        audio.playCollision(relativeSpeed / SETTINGS.maxSpeed);
+      }
+
+      const wall = pair.bodyA.label.startsWith('wall-') ? pair.bodyA
+        : pair.bodyB.label.startsWith('wall-') ? pair.bodyB
+          : null;
+      const body = pair.bodyA.label === 'ball' ? pair.bodyA
+        : pair.bodyB.label === 'ball' ? pair.bodyB
+          : null;
+      const ball = body ? ballByBodyId.get(body.id) : null;
+      if (!wall || !ball || ball.state !== 'active') return;
+
+      const velocity = { x: body.velocity.x, y: body.velocity.y };
+      if (wall.label === 'wall-top' || wall.label === 'wall-bottom') {
+        velocity.y *= SETTINGS.wallBounceMultiplier;
+      } else {
+        velocity.x *= SETTINGS.wallBounceMultiplier;
+      }
+      const speed = Math.hypot(velocity.x, velocity.y);
+      if (speed > SETTINGS.maxSpeed) {
+        const factor = SETTINGS.maxSpeed / speed;
+        velocity.x *= factor;
+        velocity.y *= factor;
+      }
+      Body.setVelocity(body, velocity);
+    });
+  });
+
+  function rotateBall(ball, deltaSeconds) {
+    if (!ball.mesh || ball.state !== 'active') return;
+    const vx = ball.body.velocity.x * worldW / W;
+    const vz = ball.body.velocity.y * worldD / H;
+    const speed = Math.hypot(vx, vz);
+    if (speed < .0001) return;
+    const axis = new THREE.Vector3(vz, 0, -vx).normalize();
+    const angle = speed * deltaSeconds * 62 / Math.max(ballWorldRadius, .001);
+    ball.mesh.rotateOnWorldAxis(axis, angle);
+  }
+
+  function animate(now) {
+    const delta = Math.min(32, Math.max(0, now - lastFrame));
+    lastFrame = now;
+    if (started) Engine.update(engine, delta || 16.67);
+    updateBallVisuals();
+    balls.forEach(ball => rotateBall(ball, delta / 1000));
+    updateCaptures(now);
+    updateEffect(now);
+
+    pockets.forEach(pocket => {
+      if (!pocket.pulse) return;
+      const pulse = 1 + Math.sin(now * .0035) * .055;
+      pocket.pulse.scale.setScalar(pulse);
+      pocket.pulse.material.opacity = .23 + Math.sin(now * .0035) * .09;
+    });
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+
+  function resolveCaptures() {
+    captures.forEach(capture => {
+      const { ball } = capture;
+      if (capture.scored) {
+        ball.state = 'pocketed';
+        if (ball.root) ball.root.visible = false;
+        return;
+      }
+      ball.state = 'active';
+      ball.body.collisionFilter.mask = 0xFFFFFFFF;
+      Body.setStatic(ball.body, false);
+      if (ball.root) {
+        ball.root.rotation.set(0, 0, 0);
+        ball.root.scale.setScalar(1);
+      }
+      updateBallVisual(ball);
+    });
+    captures = [];
+    if (balls.length && balls.every(ball => ball.state === 'pocketed')) {
+      round += 1;
+      chooseNextPockets();
+      resetBalls();
+      updateBallCountUi();
+    }
+  }
+
+  function resize() {
+    resolveCaptures();
+    const previousW = W;
+    const previousH = H;
+    const nextW = Math.max(320, stage.clientWidth || window.innerWidth);
+    const nextH = Math.max(320, stage.clientHeight || window.innerHeight);
+    const ballRatios = balls.map(ball => ({
+      x: ball.body.position.x / previousW,
+      y: ball.body.position.y / previousH
+    }));
+    const pocketRatios = pockets.map(pocket => ({
+      x: pocket.body.position.x / previousW,
+      y: pocket.body.position.y / previousH
+    }));
+    W = nextW;
+    H = nextH;
+    renderer.setSize(W, H, false);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    updateWorldMetrics();
+    updateCamera();
+    makeWalls();
+
+    balls.forEach((ball, index) => Body.setPosition(ball.body, {
+      x: clamp(ballRatios[index].x * W, SETTINGS.ballRadius + 3, W - SETTINGS.ballRadius - 3),
+      y: clamp(ballRatios[index].y * H, SETTINGS.ballRadius + 3, H - SETTINGS.ballRadius - 3)
+    }));
+    pockets.forEach((pocket, index) => Body.setPosition(pocket.body, {
+      x: clamp(pocketRatios[index].x * W, SETTINGS.goalRadius + 8, W - SETTINGS.goalRadius - 8),
+      y: clamp(pocketRatios[index].y * H, SETTINGS.goalRadius + 8, H - SETTINGS.goalRadius - 8)
+    }));
+    buildScenario(currentScenario);
+  }
+
+  const keys = new Set();
+  function updateKeyboard() {
+    keyboardX = (keys.has('ArrowRight') || keys.has('KeyD') ? 1 : 0) - (keys.has('ArrowLeft') || keys.has('KeyA') ? 1 : 0);
+    keyboardY = (keys.has('ArrowDown') || keys.has('KeyS') ? 1 : 0) - (keys.has('ArrowUp') || keys.has('KeyW') ? 1 : 0);
+  }
+
+  window.addEventListener('keydown', event => {
+    keys.add(event.code);
+    updateKeyboard();
+    if (event.code.startsWith('Arrow')) event.preventDefault();
+  });
+  window.addEventListener('keyup', event => {
+    keys.delete(event.code);
+    updateKeyboard();
+  });
+
+  function activeBallCenter() {
+    const activeBalls = balls.filter(ball => ball.state === 'active');
+    if (!activeBalls.length) return { x: W / 2, y: H / 2 };
+    return activeBalls.reduce((center, ball) => ({
+      x: center.x + ball.body.position.x / activeBalls.length,
+      y: center.y + ball.body.position.y / activeBalls.length
+    }), { x: 0, y: 0 });
+  }
+
+  stage.addEventListener('pointerdown', event => {
+    if (!started || sensorSeen || !balls.some(ball => ball.state === 'active')) return;
+    pointerActive = true;
+    stage.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!pointerActive || sensorSeen) return;
+    const rect = stage.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const center = activeBallCenter();
+    keyboardX = clamp((x - center.x) / 170, -1, 1);
+    keyboardY = clamp((y - center.y) / 170, -1, 1);
+  });
+  stage.addEventListener('pointerup', () => {
+    pointerActive = false;
+    if (!keys.size) {
+      keyboardX = 0;
+      keyboardY = 0;
+    }
+  });
+  stage.addEventListener('pointercancel', () => {
+    pointerActive = false;
+    if (!keys.size) {
+      keyboardX = 0;
+      keyboardY = 0;
+    }
+  });
+
+  document.querySelectorAll('.scene-tab').forEach(button => {
+    button.addEventListener('click', () => {
+      const sceneId = button.dataset.scene;
+      if (!SCENARIOS[sceneId] || sceneId === currentScenario) return;
+      resolveCaptures();
+      buildScenario(sceneId);
+    });
+  });
+
+  removeBallBtn.addEventListener('click', () => setBallCount(selectedBallCount - 1));
+  addBallBtn.addEventListener('click', () => setBallCount(selectedBallCount + 1));
+  removePocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount - 1));
+  addPocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount + 1));
+  calibrateBtn.addEventListener('click', calibrate);
+  soundBtn.addEventListener('click', () => {
+    const soundEnabled = audio.setEnabled(!audio.enabled);
+    soundBtn.dataset.tooltip = soundEnabled ? 'Desactivar sonido' : 'Activar sonido';
+    soundBtn.setAttribute('aria-label', soundBtn.dataset.tooltip);
+    soundBtn.innerHTML = `<i data-lucide="${soundEnabled ? 'volume-2' : 'volume-x'}"></i>`;
+    initIcons();
+  });
+  fullscreenBtn.addEventListener('click', async () => {
+    try {
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
+    } catch (error) {
+      console.warn('Pantalla completa no disponible:', error);
+    }
+  });
+
+  startBtn.addEventListener('click', async () => {
+    started = true;
+    intro.classList.add('hidden');
+    audio.ensureContext();
+    await enableSensor();
+  });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => window.setTimeout(() => {
+    resize();
+    calibrate();
+  }, 280));
+
+  updateWorldMetrics();
+  updateCamera();
+  makeWalls();
+  createBallBodies(selectedBallCount);
+  buildScenario(currentScenario);
+  updateBallCountUi();
+  updatePocketCountUi();
+  initIcons();
+  requestAnimationFrame(animate);
+})();

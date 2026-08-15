@@ -25,17 +25,32 @@
         </nav>
 
         <div class="actions">
-          <div class="ball-stepper" aria-label="Pelotas por ronda">
-            <button id="removeBallBtn" class="step-btn" type="button" aria-label="Quitar pelota" title="Quitar pelota">
-              <i data-lucide="minus"></i>
-            </button>
-            <div class="ball-count" aria-live="polite">
-              <i data-lucide="circle"></i>
-              <strong id="ballCountValue">1</strong>
+          <div class="setup-controls">
+            <div class="count-stepper" aria-label="Pelotas por ronda">
+              <button id="removeBallBtn" class="step-btn" type="button" aria-label="Quitar pelota" title="Quitar pelota">
+                <i data-lucide="minus"></i>
+              </button>
+              <div class="item-count" aria-live="polite" title="Pelotas">
+                <i data-lucide="circle"></i>
+                <strong id="ballCountValue">1</strong>
+              </div>
+              <button id="addBallBtn" class="step-btn" type="button" aria-label="Agregar pelota" title="Agregar pelota">
+                <i data-lucide="plus"></i>
+              </button>
             </div>
-            <button id="addBallBtn" class="step-btn" type="button" aria-label="Agregar pelota" title="Agregar pelota">
-              <i data-lucide="plus"></i>
-            </button>
+
+            <div class="count-stepper" aria-label="Troneras por ronda">
+              <button id="removePocketBtn" class="step-btn" type="button" aria-label="Quitar tronera" title="Quitar tronera">
+                <i data-lucide="minus"></i>
+              </button>
+              <div class="item-count" aria-live="polite" title="Troneras">
+                <i data-lucide="circle-dot"></i>
+                <strong id="pocketCountValue">1</strong>
+              </div>
+              <button id="addPocketBtn" class="step-btn" type="button" aria-label="Agregar tronera" title="Agregar tronera">
+                <i data-lucide="plus"></i>
+              </button>
+            </div>
           </div>
           <div class="score-box" aria-label="Puntaje">
             <i data-lucide="circle-dot"></i>
