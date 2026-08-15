@@ -273,14 +273,14 @@ button:focus-visible {
   left: 50%;
   bottom: var(--safe-bottom);
   display: block;
-  width: min(440px, calc(100vw - 28px));
-  min-height: 68px;
-  padding: 9px 12px 10px;
+  width: min(440px, 82vh, calc(100vw - 28px));
+  min-height: clamp(52px, 9vh, 68px);
+  padding: clamp(6px, 1.2vh, 9px) clamp(9px, 1.6vh, 12px) clamp(7px, 1.35vh, 10px);
   border: 1px solid var(--line);
   border-radius: 6px;
   background: rgba(13, 15, 14, .68);
   color: var(--muted);
-  font-size: 11px;
+  font-size: clamp(9px, 1.45vh, 11px);
   font-weight: 750;
   backdrop-filter: blur(10px);
   transform: translateX(-50%);
@@ -298,18 +298,18 @@ button:focus-visible {
 #steeringIndicator {
   display: grid;
   width: 100%;
-  grid-template-columns: 22px minmax(0, 1fr) 22px;
+  grid-template-columns: clamp(18px, 2.9vh, 22px) minmax(0, 1fr) clamp(18px, 2.9vh, 22px);
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
+  gap: clamp(6px, 1vh, 8px);
+  margin-top: clamp(5px, 1vh, 8px);
+  padding-top: clamp(5px, 1vh, 8px);
   border-top: 1px solid var(--line);
 }
 
 .steering-side {
   text-align: center;
   color: var(--muted);
-  font-size: 20px;
+  font-size: clamp(16px, 2.65vh, 20px);
   font-weight: 900;
   line-height: 1;
   transition: color .12s ease, text-shadow .12s ease;
@@ -324,7 +324,7 @@ button:focus-visible {
 .steering-track {
   position: relative;
   width: 100%;
-  height: 12px;
+  height: clamp(9px, 1.6vh, 12px);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .14);
   border-radius: 999px;
@@ -344,8 +344,8 @@ button:focus-visible {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 12px;
-  height: 12px;
+  width: clamp(9px, 1.6vh, 12px);
+  height: clamp(9px, 1.6vh, 12px);
   border: 1px solid rgba(255, 255, 255, .7);
   border-radius: 50%;
   background: var(--accent);
@@ -356,10 +356,10 @@ button:focus-visible {
 
 .status-dot {
   position: absolute;
-  top: 13px;
-  left: 14px;
-  width: 7px;
-  height: 7px;
+  top: clamp(9px, 1.7vh, 13px);
+  left: clamp(11px, 1.8vh, 14px);
+  width: clamp(6px, .9vh, 7px);
+  height: clamp(6px, .9vh, 7px);
   flex: 0 0 auto;
   border-radius: 50%;
   background: #de8a50;
@@ -717,8 +717,8 @@ button:focus-visible {
 
   #controlStatus {
     left: 50%;
-    bottom: calc(var(--safe-bottom) + 58px);
-    width: min(440px, calc(100vw - 24px));
+    bottom: calc(var(--safe-bottom) + clamp(50px, 7vh, 58px));
+    width: min(440px, 82vh, calc(100vw - 24px));
     transform: translateX(-50%);
   }
 
