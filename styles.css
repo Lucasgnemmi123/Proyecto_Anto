@@ -380,7 +380,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 14px 0 20px;
+  margin: 14px 0 16px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 750;
@@ -391,6 +391,72 @@ button:focus-visible {
   height: 4px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+.orientation-setting {
+  margin-bottom: 16px;
+}
+
+.orientation-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.orientation-picker {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .045);
+}
+
+.orientation-option {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.orientation-option:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .06);
+}
+
+.orientation-option[aria-pressed="true"] {
+  border-color: rgba(var(--accent-rgb), .5);
+  background: rgba(var(--accent-rgb), .14);
+  color: var(--ink);
+}
+
+.orientation-shape {
+  display: block;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.orientation-shape.portrait {
+  width: 9px;
+  height: 14px;
+}
+
+.orientation-shape.landscape {
+  width: 15px;
+  height: 10px;
 }
 
 #startBtn {
@@ -415,6 +481,47 @@ button:focus-visible {
 
 #startBtn:active {
   transform: scale(.985);
+}
+
+#orientationGuard {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: none;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 8, 7, .92);
+  text-align: center;
+  backdrop-filter: blur(18px);
+}
+
+#orientationGuard.visible {
+  display: grid;
+}
+
+.orientation-guard-panel {
+  display: grid;
+  max-width: 330px;
+  justify-items: center;
+  gap: 12px;
+}
+
+.orientation-guard-panel .lucide {
+  width: 44px;
+  height: 44px;
+  color: var(--accent);
+  stroke-width: 1.7;
+}
+
+.orientation-guard-panel strong {
+  font-size: 17px;
+  font-weight: 950;
+}
+
+.orientation-guard-panel span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 #webglError {
@@ -508,6 +615,46 @@ button:focus-visible {
 
   .scene-tab {
     padding-inline: 7px;
+  }
+}
+
+@media (max-height: 440px) and (orientation: landscape) {
+  #intro {
+    align-items: center;
+    padding: 10px;
+  }
+
+  .intro-panel {
+    width: min(400px, 100%);
+    padding: 13px;
+  }
+
+  .intro-panel h1 {
+    font-size: 32px;
+  }
+
+  .eyebrow {
+    margin-bottom: 4px;
+  }
+
+  .intro-meta {
+    margin: 6px 0 9px;
+  }
+
+  .orientation-setting {
+    margin-bottom: 9px;
+  }
+
+  .orientation-label {
+    margin-bottom: 4px;
+  }
+
+  .orientation-option {
+    min-height: 34px;
+  }
+
+  #startBtn {
+    min-height: 42px;
   }
 }
 

@@ -26,9 +26,13 @@ import { SCENARIOS, SETTINGS } from './config.js';
   const statusText = document.getElementById('statusText');
   const calibrateBtn = document.getElementById('calibrateBtn');
   const soundBtn = document.getElementById('soundBtn');
+  const orientationBtn = document.getElementById('orientationBtn');
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   const resultCallout = document.getElementById('resultCallout');
   const resultText = document.getElementById('resultText');
+  const orientationGuard = document.getElementById('orientationGuard');
+  const orientationGuardText = document.getElementById('orientationGuardText');
+  const orientationOptions = [...document.querySelectorAll('.orientation-option')];
   const themeMeta = document.querySelector('meta[name="theme-color"]');
   const audio = new AudioController();
 
@@ -43,6 +47,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let round = 1;
   let selectedBallCount = 1;
   let selectedPocketCount = 1;
+  let selectedOrientation = readOrientationPreference();
+  let orientationMismatch = false;
   let started = false;
   let captures = [];
   let lastFrame = performance.now();
@@ -56,6 +62,10 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let keyboardX = 0;
   let keyboardY = 0;
   let pointerActive = false;
+  let sensorEnabled = false;
+  let orientationLockPending = false;
+  let wakeLock = null;
+  let wakeLockRequestPending = false;
   let feltMesh = null;
   let feltMaterial = null;
   let activeEffect = null;
@@ -768,9 +778,29 @@ import { SCENARIOS, SETTINGS } from './config.js';
     setStatus(`${selectedPocketCount} ${noun} EN ZONAS ALEATORIAS`, sensorSeen);
   }
 
+  function readOrientationPreference() {
+    try {
+      const stored = window.localStorage.getItem('pocketTiltOrientation');
+      if (stored === 'portrait' || stored === 'landscape') return stored;
+    } catch (error) {
+      console.info('No fue posible leer la orientacion guardada:', error);
+    }
+    return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+  }
+
+  function currentScreenOrientation() {
+    const type = screen.orientation && screen.orientation.type;
+    if (typeof type === 'string') {
+      if (type.startsWith('landscape')) return 'landscape';
+      if (type.startsWith('portrait')) return 'portrait';
+    }
+    return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+  }
+
   function screenAngle() {
     if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
-    return typeof window.orientation === 'number' ? window.orientation : 0;
+    if (typeof window.orientation === 'number') return window.orientation;
+    return currentScreenOrientation() === 'landscape' ? 90 : 0;
   }
 
   function mapTilt(betaDelta, gammaDelta) {
@@ -784,6 +814,118 @@ import { SCENARIOS, SETTINGS } from './config.js';
   function setStatus(text, active) {
     statusText.textContent = text;
     controlStatus.classList.toggle('active', Boolean(active));
+  }
+
+  function updateOrientationUi() {
+    const isPortrait = selectedOrientation === 'portrait';
+    const currentLabel = isPortrait ? 'vertical' : 'horizontal';
+    const nextLabel = isPortrait ? 'horizontal' : 'vertical';
+
+    orientationOptions.forEach(option => {
+      option.setAttribute('aria-pressed', String(option.dataset.orientation === selectedOrientation));
+    });
+    orientationBtn.dataset.tooltip = `Cambiar a ${nextLabel}`;
+    orientationBtn.setAttribute('aria-label', `Orientacion ${currentLabel}. Cambiar a ${nextLabel}`);
+    orientationBtn.innerHTML = `<i data-lucide="${isPortrait ? 'rectangle-vertical' : 'rectangle-horizontal'}"></i>`;
+    orientationGuardText.textContent = `Este juego esta configurado para usarse en ${currentLabel}.`;
+    document.documentElement.dataset.gameOrientation = selectedOrientation;
+    initIcons();
+  }
+
+  function updateOrientationState() {
+    const wasMismatched = orientationMismatch;
+    orientationMismatch = started && currentScreenOrientation() !== selectedOrientation;
+    orientationGuard.classList.toggle('visible', orientationMismatch);
+    orientationGuard.setAttribute('aria-hidden', String(!orientationMismatch));
+
+    if (orientationMismatch && !wasMismatched) {
+      setStatus(`GIRA EL DISPOSITIVO A ${selectedOrientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, false);
+    } else if (!orientationMismatch && wasMismatched) {
+      calibrate();
+    }
+  }
+
+  function setSelectedOrientation(orientation, announce = false) {
+    if (orientation !== 'portrait' && orientation !== 'landscape') return;
+    const changed = orientation !== selectedOrientation;
+    selectedOrientation = orientation;
+    try {
+      window.localStorage.setItem('pocketTiltOrientation', orientation);
+    } catch (error) {
+      console.info('No fue posible guardar la orientacion:', error);
+    }
+    updateOrientationUi();
+    updateOrientationState();
+    if (changed) calibrate();
+    if (announce && !orientationMismatch) {
+      setStatus(`MODO ${orientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, sensorSeen);
+    }
+  }
+
+  function isTouchDevice() {
+    return navigator.maxTouchPoints > 0 || window.matchMedia('(any-pointer: coarse)').matches;
+  }
+
+  async function lockSelectedOrientation({ enterFullscreen = true } = {}) {
+    if (!screen.orientation || typeof screen.orientation.lock !== 'function') {
+      updateOrientationState();
+      return false;
+    }
+    if (orientationLockPending) return false;
+
+    orientationLockPending = true;
+    try {
+      if (enterFullscreen && isTouchDevice() && !document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+      await screen.orientation.lock(selectedOrientation);
+      updateOrientationState();
+      return true;
+    } catch (error) {
+      console.info('Bloqueo de orientacion no disponible; se usara el aviso para girar:', error);
+      updateOrientationState();
+      return false;
+    } finally {
+      orientationLockPending = false;
+    }
+  }
+
+  async function requestWakeLock() {
+    if (!started || document.visibilityState !== 'visible' || wakeLock || wakeLockRequestPending) return false;
+    if (!('wakeLock' in navigator)) {
+      console.info('Bloqueo de reposo no disponible en este navegador.');
+      return false;
+    }
+
+    wakeLockRequestPending = true;
+    try {
+      const sentinel = await navigator.wakeLock.request('screen');
+      if (!started || document.visibilityState !== 'visible') {
+        await sentinel.release();
+        return false;
+      }
+      wakeLock = sentinel;
+      sentinel.addEventListener('release', () => {
+        if (wakeLock === sentinel) wakeLock = null;
+      }, { once: true });
+      return true;
+    } catch (error) {
+      console.info('No fue posible mantener la pantalla activa:', error);
+      return false;
+    } finally {
+      wakeLockRequestPending = false;
+    }
+  }
+
+  async function releaseWakeLock() {
+    const activeWakeLock = wakeLock;
+    wakeLock = null;
+    if (!activeWakeLock || activeWakeLock.released) return;
+    try {
+      await activeWakeLock.release();
+    } catch (error) {
+      console.info('No fue posible liberar el bloqueo de reposo:', error);
+    }
   }
 
   function onOrientation(event) {
@@ -807,12 +949,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   async function enableSensor() {
     if (typeof DeviceOrientationEvent === 'undefined') return false;
+    if (sensorEnabled) return true;
     try {
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         const result = await DeviceOrientationEvent.requestPermission();
         if (result !== 'granted') return false;
       }
       window.addEventListener('deviceorientation', onOrientation, true);
+      sensorEnabled = true;
       setStatus('BUSCANDO SENSOR DE MOVIMIENTO', false);
       window.setTimeout(() => {
         if (!sensorSeen) setStatus('CONTROL LISTO', false);
@@ -1064,7 +1208,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
   function animate(now) {
     const delta = Math.min(32, Math.max(0, now - lastFrame));
     lastFrame = now;
-    if (started) Engine.update(engine, delta || 16.67);
+    if (started && !orientationMismatch) Engine.update(engine, delta || 16.67);
     updateBallVisuals();
     balls.forEach(ball => rotateBall(ball, delta / 1000));
     updateCaptures(now);
@@ -1208,6 +1352,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
   removePocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount - 1));
   addPocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount + 1));
   calibrateBtn.addEventListener('click', calibrate);
+  orientationOptions.forEach(option => {
+    option.addEventListener('click', () => setSelectedOrientation(option.dataset.orientation));
+  });
+  orientationBtn.addEventListener('click', () => {
+    const nextOrientation = selectedOrientation === 'portrait' ? 'landscape' : 'portrait';
+    setSelectedOrientation(nextOrientation, true);
+    void lockSelectedOrientation();
+  });
   soundBtn.addEventListener('click', () => {
     const soundEnabled = audio.setEnabled(!audio.enabled);
     soundBtn.dataset.tooltip = soundEnabled ? 'Desactivar sonido' : 'Activar sonido';
@@ -1217,25 +1369,46 @@ import { SCENARIOS, SETTINGS } from './config.js';
   });
   fullscreenBtn.addEventListener('click', async () => {
     try {
-      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        await lockSelectedOrientation({ enterFullscreen: false });
+      }
       else await document.exitFullscreen();
     } catch (error) {
       console.warn('Pantalla completa no disponible:', error);
     }
   });
 
-  startBtn.addEventListener('click', async () => {
+  startBtn.addEventListener('click', () => {
     started = true;
     intro.classList.add('hidden');
     audio.ensureContext();
-    await enableSensor();
+    updateOrientationState();
+    void enableSensor();
+    void lockSelectedOrientation();
+    void requestWakeLock();
   });
 
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', () => {
+    resize();
+    updateOrientationState();
+  });
   window.addEventListener('orientationchange', () => window.setTimeout(() => {
     resize();
+    updateOrientationState();
     calibrate();
   }, 280));
+  document.addEventListener('fullscreenchange', () => {
+    updateOrientationState();
+    if (started && document.fullscreenElement && !orientationLockPending) {
+      void lockSelectedOrientation({ enterFullscreen: false });
+    }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void requestWakeLock();
+    else void releaseWakeLock();
+  });
+  window.addEventListener('pagehide', () => void releaseWakeLock());
 
   updateWorldMetrics();
   updateCamera();
@@ -1244,6 +1417,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
   buildScenario(currentScenario);
   updateBallCountUi();
   updatePocketCountUi();
+  updateOrientationUi();
   initIcons();
   requestAnimationFrame(animate);
 })();

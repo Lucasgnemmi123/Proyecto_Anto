@@ -62,6 +62,9 @@
           <button id="soundBtn" class="tool" type="button" data-tooltip="Desactivar sonido" aria-label="Desactivar sonido">
             <i data-lucide="volume-2"></i>
           </button>
+          <button id="orientationBtn" class="tool" type="button" data-tooltip="Cambiar a horizontal" aria-label="Orientacion vertical. Cambiar a horizontal">
+            <i data-lucide="rectangle-vertical"></i>
+          </button>
           <button id="fullscreenBtn" class="tool" type="button" data-tooltip="Pantalla completa" aria-label="Pantalla completa">
             <i data-lucide="maximize"></i>
           </button>
@@ -84,11 +87,32 @@
         <p class="eyebrow">Gyro arcade</p>
         <h1 id="gameTitle">Pocket<br>Tilt</h1>
         <div class="intro-meta">POOL CLUB <span></span> RONDA 01</div>
+        <div class="orientation-setting">
+          <span id="orientationLabel" class="orientation-label">Orientacion del dispositivo</span>
+          <div id="orientationPicker" class="orientation-picker" role="group" aria-labelledby="orientationLabel">
+            <button class="orientation-option" type="button" data-orientation="portrait" aria-pressed="true">
+              <span class="orientation-shape portrait" aria-hidden="true"></span>
+              Vertical
+            </button>
+            <button class="orientation-option" type="button" data-orientation="landscape" aria-pressed="false">
+              <span class="orientation-shape landscape" aria-hidden="true"></span>
+              Horizontal
+            </button>
+          </div>
+        </div>
         <button id="startBtn" type="button">
           JUGAR
           <i data-lucide="play"></i>
         </button>
       </section>
+    </div>
+
+    <div id="orientationGuard" role="status" aria-live="polite" aria-hidden="true">
+      <div class="orientation-guard-panel">
+        <i data-lucide="rotate-cw"></i>
+        <strong>GIRA TU DISPOSITIVO</strong>
+        <span id="orientationGuardText">Este juego esta configurado para usarse en vertical.</span>
+      </div>
     </div>
 
     <div id="webglError" role="alert">

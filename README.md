@@ -5,6 +5,8 @@ Juego de inclinacion con fisica Matter.js y render 3D Three.js.
 ## Caracteristicas
 
 - Control por inclinacion en telefonos y tablets.
+- Seleccion y bloqueo de orientacion vertical u horizontal, con aviso de giro como respaldo.
+- Pantalla activa durante la partida mediante Screen Wake Lock.
 - Flechas, WASD y puntero en escritorio.
 - Entre 1 y 5 pelotas por ronda.
 - Entre 1 y 5 troneras distribuidas en zonas aleatorias.

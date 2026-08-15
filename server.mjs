@@ -25,7 +25,8 @@ createServer((request, response) => {
 
   response.writeHead(200, {
     'Content-Type': contentTypes[extname(filePath)] || 'application/octet-stream',
-    'Cache-Control': 'no-store'
+    'Cache-Control': 'no-store',
+    'Permissions-Policy': 'accelerometer=(self), gyroscope=(self), fullscreen=(self), screen-wake-lock=(self)'
   });
   createReadStream(filePath).pipe(response);
 }).listen(port, host, () => {
