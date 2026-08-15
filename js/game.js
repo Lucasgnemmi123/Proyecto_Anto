@@ -44,12 +44,28 @@ import { SCENARIOS, SETTINGS } from './config.js';
     ? { sphereWidth: 24, sphereHeight: 16, cylinder: 24, torusTube: 8, torusRadial: 32, ring: 32, shape: 16 }
     : { sphereWidth: 40, sphereHeight: 28, cylinder: 48, torusTube: 12, torusRadial: 64, ring: 64, shape: 32 };
 
+  const RESPONSIVE_REFERENCE_SIDE = 700;
+  const MINIMUM_GAME_SCALE = .55;
+  const responsiveScaleFor = (width, height) => Math.max(
+    MINIMUM_GAME_SCALE,
+    Math.min(1, Math.min(width, height) / RESPONSIVE_REFERENCE_SIDE)
+  );
+
   let W = Math.max(320, window.innerWidth);
   let H = Math.max(320, window.innerHeight);
+  let gameScale = responsiveScaleFor(W, H);
+  let ballRadius = SETTINGS.ballRadius * gameScale;
+  let goalRadius = SETTINGS.goalRadius * gameScale;
+  let wallThickness = SETTINGS.wallThickness * gameScale;
+  let pocketAssistRadius = SETTINGS.pocketAssistRadius * gameScale;
+  let autoSpeed = SETTINGS.autoSpeed * gameScale;
+  let maxSpeed = SETTINGS.maxSpeed * gameScale;
+  let steeringForce = SETTINGS.tiltSteeringForce * gameScale;
+  let pocketAssistForce = SETTINGS.pocketAssistForce * gameScale;
   let worldW = 14;
   let worldD = worldW * H / W;
-  let ballWorldRadius = SETTINGS.ballRadius * worldW / W;
-  let goalWorldRadius = SETTINGS.goalRadius * worldW / W;
+  let ballWorldRadius = ballRadius * worldW / W;
+  let goalWorldRadius = goalRadius * worldW / W;
   let currentScenario = 'pool';
   let score = 0;
   let round = 1;
@@ -92,7 +108,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
   engine.gravity.y = 0;
   engine.gravity.scale = 0;
 
-  const initialPocketBody = Bodies.circle(W * .78, H * .34, SETTINGS.goalRadius, {
+  const initialPocketBody = Bodies.circle(W * .78, H * .34, goalRadius, {
     label: 'goal',
     isStatic: true,
     isSensor: true,
@@ -256,10 +272,19 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   function updateWorldMetrics() {
+    gameScale = responsiveScaleFor(W, H);
+    ballRadius = SETTINGS.ballRadius * gameScale;
+    goalRadius = SETTINGS.goalRadius * gameScale;
+    wallThickness = SETTINGS.wallThickness * gameScale;
+    pocketAssistRadius = SETTINGS.pocketAssistRadius * gameScale;
+    autoSpeed = SETTINGS.autoSpeed * gameScale;
+    maxSpeed = SETTINGS.maxSpeed * gameScale;
+    steeringForce = SETTINGS.tiltSteeringForce * gameScale;
+    pocketAssistForce = SETTINGS.pocketAssistForce * gameScale;
     worldW = 14;
     worldD = worldW * H / W;
-    ballWorldRadius = SETTINGS.ballRadius * worldW / W;
-    goalWorldRadius = SETTINGS.goalRadius * worldW / W;
+    ballWorldRadius = ballRadius * worldW / W;
+    goalWorldRadius = goalRadius * worldW / W;
   }
 
   function updateCamera() {
@@ -280,7 +305,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function makeWalls() {
     walls.forEach(wall => Composite.remove(engine.world, wall));
-    const t = SETTINGS.wallThickness;
+    const t = wallThickness;
     const wallOptions = {
       isStatic: true,
       restitution: SETTINGS.wallRestitution,
@@ -628,12 +653,12 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function makePocketPositions(count, previousPositions = []) {
     const positions = [];
-    const margin = SETTINGS.goalRadius + 14;
+    const margin = goalRadius + 14 * gameScale;
     const spanX = Math.max(1, W - margin * 2);
     const spanY = Math.max(1, H - margin * 2);
-    const preferredGap = SETTINGS.goalRadius * 2.12;
-    const minimumGap = SETTINGS.goalRadius * 1.68;
-    const movementGap = SETTINGS.goalRadius * 1.25;
+    const preferredGap = goalRadius * 2.12;
+    const minimumGap = goalRadius * 1.68;
+    const movementGap = goalRadius * 1.25;
 
     for (let index = 0; index < count; index++) {
       let candidate = null;
@@ -678,7 +703,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const positions = makePocketPositions(count, previousPositions);
 
     positions.forEach((position, index) => {
-      const body = Bodies.circle(position.x, position.y, SETTINGS.goalRadius, {
+      const body = Bodies.circle(position.x, position.y, goalRadius, {
         label: 'goal',
         isStatic: true,
         isSensor: true,
@@ -702,7 +727,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     ballByBodyId.clear();
 
     for (let index = 0; index < count; index++) {
-      const body = Bodies.circle(W * .25, H * .5, SETTINGS.ballRadius, {
+      const body = Bodies.circle(W * .25, H * .5, ballRadius, {
         label: 'ball',
         restitution: SETTINGS.restitution,
         friction: .018,
@@ -719,9 +744,9 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function makeSpawnPositions(count) {
     const positions = [];
-    const margin = SETTINGS.ballRadius + 18;
-    const minimumGap = SETTINGS.ballRadius * 2.25;
-    const minimumGoalGap = SETTINGS.goalRadius + SETTINGS.ballRadius + 24;
+    const margin = ballRadius + 18 * gameScale;
+    const minimumGap = ballRadius * 2.25;
+    const minimumGoalGap = goalRadius + ballRadius + 24 * gameScale;
     const pocketCenterX = pockets.reduce((total, pocket) => total + pocket.body.position.x, 0) / Math.max(1, pockets.length);
     const pocketsOnRight = pocketCenterX >= W / 2;
 
@@ -1267,7 +1292,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
       ball.heading = currentHeading;
 
       const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
-      const nextSpeed = clamp(lerp(speed, SETTINGS.autoSpeed, accelerationBlend), 0, SETTINGS.maxSpeed);
+      const nextSpeed = clamp(lerp(speed, autoSpeed, accelerationBlend), 0, maxSpeed);
       Body.setVelocity(ball.body, {
         x: Math.cos(currentHeading) * nextSpeed,
         y: Math.sin(currentHeading) * nextSpeed
@@ -1275,13 +1300,13 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
       if (Math.abs(smoothSteering) > .001) {
         Body.applyForce(ball.body, ball.body.position, {
-          x: -Math.sin(currentHeading) * ball.body.mass * SETTINGS.tiltSteeringForce * smoothSteering,
-          y: Math.cos(currentHeading) * ball.body.mass * SETTINGS.tiltSteeringForce * smoothSteering
+          x: -Math.sin(currentHeading) * ball.body.mass * steeringForce * smoothSteering,
+          y: Math.cos(currentHeading) * ball.body.mass * steeringForce * smoothSteering
         });
       }
 
       let assistedPocket = null;
-      let assistedDistance = SETTINGS.pocketAssistRadius;
+      let assistedDistance = pocketAssistRadius;
       pockets.forEach(pocket => {
         const distance = Math.hypot(
           pocket.body.position.x - ball.body.position.x,
@@ -1297,9 +1322,9 @@ import { SCENARIOS, SETTINGS } from './config.js';
         const assistY = (assistedPocket.body.position.y - ball.body.position.y) / assistedDistance;
         const forwardAlignment = Math.cos(currentHeading) * assistX + Math.sin(currentHeading) * assistY;
         if (forwardAlignment > .15) {
-          const assistRange = Math.max(1, SETTINGS.pocketAssistRadius - SETTINGS.goalRadius);
-          const proximity = 1 - clamp((assistedDistance - SETTINGS.goalRadius) / assistRange, 0, 1);
-          const assistForce = ball.body.mass * SETTINGS.pocketAssistForce * proximity;
+          const assistRange = Math.max(1, pocketAssistRadius - goalRadius);
+          const proximity = 1 - clamp((assistedDistance - goalRadius) / assistRange, 0, 1);
+          const assistForce = ball.body.mass * pocketAssistForce * proximity;
           Body.applyForce(ball.body, ball.body.position, {
             x: assistX * assistForce,
             y: assistY * assistForce
@@ -1307,7 +1332,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
         }
       }
 
-      const captureDistance = SETTINGS.goalRadius - SETTINGS.ballRadius * .46;
+      const captureDistance = goalRadius - ballRadius * .46;
       const targetPocket = pockets.find(pocket => (
         Math.hypot(ball.body.position.x - pocket.body.position.x, ball.body.position.y - pocket.body.position.y) < captureDistance
       ));
@@ -1324,7 +1349,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
           pair.bodyA.velocity.x - pair.bodyB.velocity.x,
           pair.bodyA.velocity.y - pair.bodyB.velocity.y
         );
-        audio.playCollision(relativeSpeed / SETTINGS.maxSpeed);
+        audio.playCollision(relativeSpeed / maxSpeed);
       }
 
       const wall = pair.bodyA.label.startsWith('wall-') ? pair.bodyA
@@ -1343,8 +1368,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
         velocity.x *= SETTINGS.wallBounceMultiplier;
       }
       const speed = Math.hypot(velocity.x, velocity.y);
-      if (speed > SETTINGS.maxSpeed) {
-        const factor = SETTINGS.maxSpeed / speed;
+      if (speed > maxSpeed) {
+        const factor = maxSpeed / speed;
         velocity.x *= factor;
         velocity.y *= factor;
       }
@@ -1414,6 +1439,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   function resize() {
     const previousW = W;
     const previousH = H;
+    const previousBallRadius = ballRadius;
+    const previousGoalRadius = goalRadius;
     const nextW = Math.max(320, stage.clientWidth || window.innerWidth);
     const nextH = Math.max(320, stage.clientHeight || window.innerHeight);
     if (nextW === previousW && nextH === previousH) return;
@@ -1430,16 +1457,20 @@ import { SCENARIOS, SETTINGS } from './config.js';
     H = nextH;
     renderer.setSize(W, H, false);
     updateWorldMetrics();
+    const ballBodyScale = ballRadius / previousBallRadius;
+    const pocketBodyScale = goalRadius / previousGoalRadius;
+    balls.forEach(ball => Body.scale(ball.body, ballBodyScale, ballBodyScale));
+    pockets.forEach(pocket => Body.scale(pocket.body, pocketBodyScale, pocketBodyScale));
     updateCamera();
     makeWalls();
 
     balls.forEach((ball, index) => Body.setPosition(ball.body, {
-      x: clamp(ballRatios[index].x * W, SETTINGS.ballRadius + 3, W - SETTINGS.ballRadius - 3),
-      y: clamp(ballRatios[index].y * H, SETTINGS.ballRadius + 3, H - SETTINGS.ballRadius - 3)
+      x: clamp(ballRatios[index].x * W, ballRadius + 3, W - ballRadius - 3),
+      y: clamp(ballRatios[index].y * H, ballRadius + 3, H - ballRadius - 3)
     }));
     pockets.forEach((pocket, index) => Body.setPosition(pocket.body, {
-      x: clamp(pocketRatios[index].x * W, SETTINGS.goalRadius + 8, W - SETTINGS.goalRadius - 8),
-      y: clamp(pocketRatios[index].y * H, SETTINGS.goalRadius + 8, H - SETTINGS.goalRadius - 8)
+      x: clamp(pocketRatios[index].x * W, goalRadius + 8 * gameScale, W - goalRadius - 8 * gameScale),
+      y: clamp(pocketRatios[index].y * H, goalRadius + 8 * gameScale, H - goalRadius - 8 * gameScale)
     }));
     buildScenario(currentScenario);
   }
@@ -1489,7 +1520,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (!pointerActive || sensorSeen) return;
     const rect = stage.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    keyboardX = clamp((x - activeBallCenterX()) / 170, -1, 1);
+    keyboardX = clamp((x - activeBallCenterX()) / (170 * gameScale), -1, 1);
   });
   stage.addEventListener('pointerup', () => {
     pointerActive = false;
