@@ -60,15 +60,9 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let lastFrame = performance.now();
   let sensorSeen = false;
   let motionSeen = false;
-  let wheelRateSeen = false;
-  let wheelRateFilterReady = false;
-  let filteredWheelRate = 0;
-  let filteredFallbackWheelRate = 0;
-  let fallbackWheelRateReady = false;
-  let previousGravityAngle = null;
-  let previousGravityAngleAt = 0;
-  let lastWheelRateAt = 0;
   let gravityFilterReady = false;
+  let gravityReferenceAngle = null;
+  let gravityHeading = Math.PI / 2;
   let rawGravityX = 0;
   let rawGravityY = 0;
   let filteredGravityX = 0;
@@ -978,28 +972,6 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function onMotion(event) {
     const now = performance.now();
-    const rotationRate = event.rotationRate;
-    const nativeWheelRate = rotationRate && typeof rotationRate.alpha === 'number'
-      ? rotationRate.alpha
-      : null;
-
-    if (Number.isFinite(nativeWheelRate)) {
-      const firstWheelRate = !wheelRateSeen;
-      if (!wheelRateFilterReady) {
-        filteredWheelRate = nativeWheelRate;
-        wheelRateFilterReady = true;
-      } else {
-        const wheelRateBlend = Math.abs(nativeWheelRate) <= SETTINGS.wheelRateDeadZone
-          ? SETTINGS.wheelRateRelease
-          : SETTINGS.wheelRateFilter;
-        filteredWheelRate += (nativeWheelRate - filteredWheelRate) * wheelRateBlend;
-      }
-      wheelRateSeen = true;
-      lastWheelRateAt = now;
-      sensorSeen = true;
-      if (firstWheelRate) setStatus('GIRA LA TABLET PARA CAMBIAR EL RUMBO', true);
-    }
-
     const acceleration = event.accelerationIncludingGravity;
     if (!acceleration || typeof acceleration.x !== 'number' || typeof acceleration.y !== 'number') return;
 
@@ -1021,28 +993,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const gravityMagnitude = Math.hypot(filteredGravityX, filteredGravityY);
     if (gravityMagnitude >= SETTINGS.gravityPlaneMinimum) {
       const gravityAngle = Math.atan2(filteredGravityY, filteredGravityX);
-      if (previousGravityAngle !== null) {
-        const elapsedSeconds = (now - previousGravityAngleAt) / 1000;
-        if (elapsedSeconds >= .004 && elapsedSeconds <= .2) {
-          const angleChange = normalizeAngle(gravityAngle - previousGravityAngle);
-          const fallbackWheelRate = -angleChange * 180 / Math.PI / elapsedSeconds;
-          if (!fallbackWheelRateReady) {
-            filteredFallbackWheelRate = fallbackWheelRate;
-            fallbackWheelRateReady = true;
-            setStatus('GIRA LA TABLET PARA CAMBIAR EL RUMBO', true);
-          } else {
-            const wheelRateBlend = Math.abs(fallbackWheelRate) <= SETTINGS.wheelRateDeadZone
-              ? SETTINGS.wheelRateRelease
-              : SETTINGS.wheelRateFilter;
-            filteredFallbackWheelRate += (fallbackWheelRate - filteredFallbackWheelRate) * wheelRateBlend;
-          }
-        }
+      if (gravityReferenceAngle === null) {
+        gravityReferenceAngle = gravityAngle;
+        gravityHeading = Math.PI / 2;
+        setStatus('LA PARTE BAJA GUÍA LAS BOLAS', true);
+      } else {
+        const rotationFromReference = normalizeAngle(gravityAngle - gravityReferenceAngle);
+        gravityHeading = normalizeAngle(Math.PI / 2 - rotationFromReference);
       }
-      previousGravityAngle = gravityAngle;
-      previousGravityAngleAt = now;
-    } else {
-      previousGravityAngle = null;
-      previousGravityAngleAt = 0;
     }
   }
 
@@ -1050,26 +1008,21 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (typeof event.beta !== 'number' || typeof event.gamma !== 'number') return;
     if (!sensorSeen) {
       sensorSeen = true;
-      setStatus('ESPERANDO GIRO DEL DISPOSITIVO', false);
+      setStatus('ESPERANDO GRAVEDAD DEL DISPOSITIVO', false);
     }
   }
 
   function calibrate() {
     smoothSteering = 0;
-    filteredWheelRate = 0;
-    filteredFallbackWheelRate = 0;
-    wheelRateFilterReady = false;
-    wheelRateSeen = false;
-    fallbackWheelRateReady = false;
-    lastWheelRateAt = 0;
-    previousGravityAngle = null;
-    previousGravityAngleAt = 0;
+    gravityReferenceAngle = null;
+    gravityHeading = Math.PI / 2;
 
     if (motionSeen && gravityFilterReady) {
       filteredGravityX = rawGravityX;
       filteredGravityY = rawGravityY;
-      previousGravityAngle = Math.atan2(filteredGravityY, filteredGravityX);
-      previousGravityAngleAt = performance.now();
+      if (Math.hypot(filteredGravityX, filteredGravityY) >= SETTINGS.gravityPlaneMinimum) {
+        gravityReferenceAngle = Math.atan2(filteredGravityY, filteredGravityX);
+      }
     }
 
     setStatus(sensorSeen ? 'CONTROL RECALIBRADO' : 'CONTROL LISTO', sensorSeen);
@@ -1265,15 +1218,6 @@ import { SCENARIOS, SETTINGS } from './config.js';
     }
   }
 
-  function wheelRateAfterDeadZone(value) {
-    const magnitude = Math.abs(value);
-    if (magnitude <= SETTINGS.wheelRateDeadZone) return 0;
-    return Math.sign(value) * Math.min(
-      magnitude - SETTINGS.wheelRateDeadZone,
-      SETTINGS.wheelRateMaximum
-    );
-  }
-
   function normalizeAngle(angle) {
     return Math.atan2(Math.sin(angle), Math.cos(angle));
   }
@@ -1283,17 +1227,10 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const targetSteering = mobileOptimized ? 0 : keyboardX;
 
     const now = performance.now();
-    const wheelRateFresh = wheelRateSeen && now - lastWheelRateAt < 250;
-    const fallbackWheelRateFresh = motionSeen && fallbackWheelRateReady && now - lastMotionAt < 250;
-    let wheelTurnDelta = 0;
-    if (wheelRateFresh || fallbackWheelRateFresh) {
-      const wheelRate = wheelRateFresh ? filteredWheelRate : filteredFallbackWheelRate;
-      const deltaSeconds = clamp(event.delta || 16.67, 8, 33) / 1000;
-      wheelTurnDelta = wheelRateAfterDeadZone(wheelRate)
-        * Math.PI / 180
-        * SETTINGS.wheelTurnGain
-        * deltaSeconds;
-    }
+    const gravityControlFresh = motionSeen
+      && gravityReferenceAngle !== null
+      && now - lastMotionAt < 350
+      && !orientationMismatch;
 
     const frameScale = clamp((event.delta || 16.67) / 16.67, .5, 2);
     const steeringResponse = Math.abs(targetSteering) < .001
@@ -1307,11 +1244,14 @@ import { SCENARIOS, SETTINGS } from './config.js';
       const currentVelocity = ball.body.velocity;
       const speed = Math.hypot(currentVelocity.x, currentVelocity.y);
       const currentHeading = speed > .35 ? Math.atan2(currentVelocity.y, currentVelocity.x) : ball.heading;
-      const drivenHeading = normalizeAngle(
-        currentHeading
-        + wheelTurnDelta
-        + smoothSteering * SETTINGS.turnRate * frameScale
-      );
+      let drivenHeading;
+      if (gravityControlFresh) {
+        const gravityBlend = 1 - Math.pow(1 - SETTINGS.gravitySteeringResponse, frameScale);
+        const headingError = normalizeAngle(gravityHeading - currentHeading);
+        drivenHeading = normalizeAngle(currentHeading + headingError * gravityBlend);
+      } else {
+        drivenHeading = normalizeAngle(currentHeading + smoothSteering * SETTINGS.turnRate * frameScale);
+      }
       ball.heading = drivenHeading;
 
       const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
