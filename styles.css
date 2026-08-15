@@ -708,8 +708,10 @@ button:focus-visible {
 
   #sceneTabs {
     position: fixed;
+    z-index: 2;
+    top: var(--safe-top);
     left: 50%;
-    bottom: var(--safe-bottom);
+    bottom: auto;
     width: min(clamp(240px, 44vh, 354px), calc(100vw - 24px));
     min-width: 0;
     transform: translateX(-50%);
@@ -717,13 +719,14 @@ button:focus-visible {
 
   .setup-controls {
     position: fixed;
+    z-index: 2;
     top: calc(var(--safe-top) + clamp(37px, 6.1vh, 49px));
     right: clamp(8px, 1.75vh, 14px);
   }
 
   #controlStatus {
     left: 50%;
-    bottom: calc(var(--safe-bottom) + clamp(50px, 7vh, 58px));
+    bottom: var(--safe-bottom);
     width: min(440px, 82vh, calc(100vw - 24px));
     transform: translateX(-50%);
   }
@@ -733,11 +736,23 @@ button:focus-visible {
   }
 
   #intro {
-    padding: clamp(10px, 2vh, 16px) clamp(10px, 2vh, 16px) calc(var(--safe-bottom) + clamp(50px, 8.25vh, 66px));
+    padding: clamp(10px, 2vh, 16px) clamp(10px, 2vh, 16px) var(--safe-bottom);
   }
 
   .tool::after {
     display: none;
+  }
+}
+
+@media (max-width: 700px) and (orientation: landscape) {
+  .brand {
+    display: none;
+  }
+
+  #sceneTabs {
+    left: clamp(8px, 1.75vh, 14px);
+    width: min(240px, calc(100vw - 210px));
+    transform: none;
   }
 }
 
