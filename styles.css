@@ -416,11 +416,76 @@ button:focus-visible {
   background: rgba(255, 255, 255, .045);
 }
 
-.control-hint {
-  margin: 7px 2px 0;
+.steering-guide {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 9px 10px;
+  border: 1px solid rgba(var(--accent-rgb), .24);
+  border-radius: 6px;
+  background: rgba(var(--accent-rgb), .07);
+}
+
+.steering-visual {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--accent);
+}
+
+.steering-arrow {
+  width: 15px;
+  height: 15px;
+  opacity: .68;
+}
+
+.steering-tablet {
+  width: 27px;
+  height: 27px;
+  transform-origin: center;
+  animation: steering-wheel 2.4s ease-in-out infinite;
+}
+
+.steering-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.steering-copy strong {
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+
+.steering-copy span {
   color: var(--muted);
   font-size: 10px;
-  line-height: 1.35;
+  line-height: 1.3;
+}
+
+@keyframes steering-wheel {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+
+  25% {
+    transform: rotate(-13deg);
+  }
+
+  50% {
+    transform: rotate(0deg);
+  }
+
+  75% {
+    transform: rotate(13deg);
+  }
 }
 
 .orientation-option {
@@ -675,6 +740,26 @@ button:focus-visible {
 
   .orientation-option {
     min-height: 34px;
+  }
+
+  .steering-guide {
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 7px;
+    margin-top: 5px;
+    padding: 5px 8px;
+  }
+
+  .steering-visual {
+    min-height: 28px;
+  }
+
+  .steering-tablet {
+    width: 23px;
+    height: 23px;
+  }
+
+  .steering-copy span {
+    font-size: 9px;
   }
 
   #startBtn {

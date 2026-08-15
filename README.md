@@ -5,6 +5,7 @@ Juego de inclinacion con fisica Matter.js y render 3D Three.js.
 ## Caracteristicas
 
 - Movimiento automatico con direccion por inclinacion lateral en telefonos y tablets.
+- Calibracion promediada y recentrado automatico usando el vector de gravedad.
 - Bloqueo de orientacion vertical u horizontal en su lado principal, con aviso de giro como respaldo.
 - Pantalla activa durante la partida mediante Screen Wake Lock.
 - Flechas izquierda/derecha, A/D y puntero en escritorio.

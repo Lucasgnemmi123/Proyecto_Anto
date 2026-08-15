@@ -63,6 +63,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let neutralGamma = null;
   let rawBeta = 0;
   let rawGamma = 0;
+  let motionSeen = false;
+  let gravityFilterReady = false;
+  let filteredLateralGravity = 0;
+  let neutralLateralGravity = 0;
+  let gravityStability = 0;
+  let gravityCalibrationActive = false;
+  let gravityCalibrationUntil = 0;
+  let gravityCalibrationSum = 0;
+  let gravityCalibrationSamples = 0;
+  let lastMotionAt = 0;
   let smoothSteering = 0;
   let keyboardX = 0;
   let pointerActive = false;
@@ -857,6 +867,15 @@ import { SCENARIOS, SETTINGS } from './config.js';
     return { x: gammaDelta, y: betaDelta };
   }
 
+  function mapGravityToLateral(x, y) {
+    const angle = ((screenAngle() % 360) + 360) % 360;
+    let screenX = x;
+    if (angle === 90) screenX = -y;
+    else if (angle === 270) screenX = y;
+    else if (angle === 180) screenX = -x;
+    return -screenX;
+  }
+
   function setStatus(text, active) {
     if (statusText.textContent !== text) statusText.textContent = text;
     const shouldBeActive = Boolean(active);
@@ -983,6 +1002,55 @@ import { SCENARIOS, SETTINGS } from './config.js';
     }
   }
 
+  function finishGravityCalibration() {
+    neutralLateralGravity = gravityCalibrationSamples > 0
+      ? gravityCalibrationSum / gravityCalibrationSamples
+      : filteredLateralGravity;
+    gravityCalibrationActive = false;
+    gravityStability = 0;
+    smoothSteering = 0;
+    setStatus('GIRA LA TABLET COMO UN VOLANTE', true);
+  }
+
+  function onMotion(event) {
+    const acceleration = event.accelerationIncludingGravity;
+    if (!acceleration || typeof acceleration.x !== 'number' || typeof acceleration.y !== 'number') return;
+
+    const lateralGravity = mapGravityToLateral(acceleration.x, acceleration.y);
+    const firstMotionReading = !motionSeen;
+    lastMotionAt = performance.now();
+    motionSeen = true;
+    sensorSeen = true;
+
+    if (!gravityFilterReady) {
+      filteredLateralGravity = lateralGravity;
+      gravityFilterReady = true;
+    } else {
+      const previousGravity = filteredLateralGravity;
+      filteredLateralGravity += (lateralGravity - filteredLateralGravity) * SETTINGS.gravityFilter;
+      const gravityChange = Math.abs(filteredLateralGravity - previousGravity);
+      gravityStability += (gravityChange - gravityStability) * .12;
+    }
+
+    if (firstMotionReading) {
+      calibrate();
+      return;
+    }
+
+    if (gravityCalibrationActive) {
+      gravityCalibrationSum += filteredLateralGravity;
+      gravityCalibrationSamples += 1;
+      if (lastMotionAt >= gravityCalibrationUntil) finishGravityCalibration();
+      return;
+    }
+
+    const gravityDelta = filteredLateralGravity - neutralLateralGravity;
+    const canRecenter = !orientationMismatch
+      && Math.abs(gravityDelta) <= SETTINGS.gravityRecenterWindow
+      && gravityStability <= SETTINGS.gravityStabilityThreshold;
+    if (canRecenter) neutralLateralGravity += gravityDelta * SETTINGS.gravityRecenterRate;
+  }
+
   function onOrientation(event) {
     if (typeof event.beta !== 'number' || typeof event.gamma !== 'number') return;
     rawBeta = event.beta;
@@ -990,7 +1058,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (!sensorSeen) {
       sensorSeen = true;
       calibrate();
-      setStatus('INCLINA A LOS LADOS PARA DOBLAR', true);
+      setStatus('GIRA LA TABLET COMO UN VOLANTE', true);
     }
   }
 
@@ -998,18 +1066,47 @@ import { SCENARIOS, SETTINGS } from './config.js';
     neutralBeta = rawBeta;
     neutralGamma = rawGamma;
     smoothSteering = 0;
+
+    if (motionSeen && gravityFilterReady) {
+      gravityCalibrationActive = true;
+      gravityCalibrationUntil = performance.now() + SETTINGS.calibrationDuration;
+      gravityCalibrationSum = filteredLateralGravity;
+      gravityCalibrationSamples = 1;
+      gravityStability = 0;
+      setStatus('MANTEN LA TABLET RECTA Y QUIETA', true);
+      return;
+    }
+
+    gravityCalibrationActive = false;
     setStatus(sensorSeen ? 'SENSOR CALIBRADO' : 'CONTROL LISTO', sensorSeen);
   }
 
   async function enableSensor() {
-    if (typeof DeviceOrientationEvent === 'undefined') return false;
+    const motionSupported = typeof DeviceMotionEvent !== 'undefined';
+    const orientationSupported = typeof DeviceOrientationEvent !== 'undefined';
+    if (!motionSupported && !orientationSupported) return false;
     if (sensorEnabled) return true;
+
     try {
-      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-        const result = await DeviceOrientationEvent.requestPermission();
-        if (result !== 'granted') return false;
+      const motionPermissionRequest = motionSupported && typeof DeviceMotionEvent.requestPermission === 'function'
+        ? DeviceMotionEvent.requestPermission()
+        : Promise.resolve(motionSupported ? 'granted' : 'unavailable');
+      const orientationPermissionRequest = orientationSupported && typeof DeviceOrientationEvent.requestPermission === 'function'
+        ? DeviceOrientationEvent.requestPermission()
+        : Promise.resolve(orientationSupported ? 'granted' : 'unavailable');
+      const [motionPermission, orientationPermission] = await Promise.allSettled([
+        motionPermissionRequest,
+        orientationPermissionRequest
+      ]);
+      const motionAllowed = motionPermission.status === 'fulfilled' && motionPermission.value === 'granted';
+      const orientationAllowed = orientationPermission.status === 'fulfilled' && orientationPermission.value === 'granted';
+      if (!motionAllowed && !orientationAllowed) {
+        setStatus('SENSOR NO AUTORIZADO', false);
+        return false;
       }
-      window.addEventListener('deviceorientation', onOrientation, true);
+
+      if (motionAllowed) window.addEventListener('devicemotion', onMotion, true);
+      if (orientationAllowed) window.addEventListener('deviceorientation', onOrientation, true);
       sensorEnabled = true;
       setStatus('BUSCANDO SENSOR DE MOVIMIENTO', false);
       window.setTimeout(() => {
@@ -1174,24 +1271,39 @@ import { SCENARIOS, SETTINGS } from './config.js';
     }
   }
 
-  function normalizeSteering(tiltDegrees) {
-    const magnitude = Math.abs(tiltDegrees);
-    if (magnitude <= SETTINGS.steeringDeadZone) return 0;
+  function normalizeSteering(value, deadZone, range, curve) {
+    const magnitude = Math.abs(value);
+    if (magnitude <= deadZone) return 0;
     const normalized = clamp(
-      (magnitude - SETTINGS.steeringDeadZone) / (SETTINGS.steeringRange - SETTINGS.steeringDeadZone),
+      (magnitude - deadZone) / (range - deadZone),
       0,
       1
     );
-    return Math.sign(tiltDegrees) * Math.pow(normalized, SETTINGS.steeringCurve);
+    return Math.sign(value) * Math.pow(normalized, curve);
   }
 
   Events.on(engine, 'beforeUpdate', event => {
     if (!started) return;
     let targetSteering = keyboardX;
 
-    if (sensorSeen && neutralBeta !== null && neutralGamma !== null) {
+    const motionFresh = motionSeen && performance.now() - lastMotionAt < 1000;
+    if (motionFresh) {
+      if (!gravityCalibrationActive) {
+        targetSteering += normalizeSteering(
+          filteredLateralGravity - neutralLateralGravity,
+          SETTINGS.gravityDeadZone,
+          SETTINGS.gravityRange,
+          SETTINGS.gravityCurve
+        );
+      }
+    } else if (sensorSeen && neutralBeta !== null && neutralGamma !== null) {
       const mapped = mapTilt(rawBeta - neutralBeta, rawGamma - neutralGamma);
-      targetSteering += normalizeSteering(mapped.x);
+      targetSteering += normalizeSteering(
+        mapped.x,
+        SETTINGS.steeringDeadZone,
+        SETTINGS.steeringRange,
+        SETTINGS.steeringCurve
+      );
     }
 
     targetSteering = clamp(targetSteering, -1, 1);
