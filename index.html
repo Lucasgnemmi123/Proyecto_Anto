@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#111612">
+  <title>Pocket Tilt</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app">
+    <div id="stage" aria-label="Mesa de juego 3D"></div>
+
+    <div id="gameUi">
+      <header class="topbar">
+        <div class="brand">
+          <strong>POCKET TILT</strong>
+          <span id="roundLabel">RONDA 01</span>
+        </div>
+
+        <nav id="sceneTabs" aria-label="Escenario">
+          <button class="scene-tab" type="button" data-scene="pool" aria-selected="true">Pool Club</button>
+          <button class="scene-tab" type="button" data-scene="rooftop" aria-selected="false">Terraza</button>
+          <button class="scene-tab" type="button" data-scene="arcade" aria-selected="false">Arcade</button>
+        </nav>
+
+        <div class="actions">
+          <div class="ball-stepper" aria-label="Pelotas por ronda">
+            <button id="removeBallBtn" class="step-btn" type="button" aria-label="Quitar pelota" title="Quitar pelota">
+              <i data-lucide="minus"></i>
+            </button>
+            <div class="ball-count" aria-live="polite">
+              <i data-lucide="circle"></i>
+              <strong id="ballCountValue">1</strong>
+            </div>
+            <button id="addBallBtn" class="step-btn" type="button" aria-label="Agregar pelota" title="Agregar pelota">
+              <i data-lucide="plus"></i>
+            </button>
+          </div>
+          <div class="score-box" aria-label="Puntaje">
+            <i data-lucide="circle-dot"></i>
+            <strong id="scoreValue" aria-live="polite">00</strong>
+          </div>
+          <button id="calibrateBtn" class="tool" type="button" data-tooltip="Calibrar sensor" aria-label="Calibrar sensor">
+            <i data-lucide="crosshair"></i>
+          </button>
+          <button id="soundBtn" class="tool" type="button" data-tooltip="Desactivar sonido" aria-label="Desactivar sonido">
+            <i data-lucide="volume-2"></i>
+          </button>
+          <button id="fullscreenBtn" class="tool" type="button" data-tooltip="Pantalla completa" aria-label="Pantalla completa">
+            <i data-lucide="maximize"></i>
+          </button>
+        </div>
+      </header>
+
+      <div id="controlStatus">
+        <span class="status-dot"></span>
+        <span id="statusText">CONTROL LISTO</span>
+      </div>
+
+      <div id="resultCallout" aria-live="polite">
+        <i data-lucide="sparkles"></i>
+        <span id="resultText">TRONERA +1</span>
+      </div>
+    </div>
+
+    <div id="intro">
+      <section class="intro-panel" aria-labelledby="gameTitle">
+        <p class="eyebrow">Gyro arcade</p>
+        <h1 id="gameTitle">Pocket<br>Tilt</h1>
+        <div class="intro-meta">POOL CLUB <span></span> RONDA 01</div>
+        <button id="startBtn" type="button">
+          JUGAR
+          <i data-lucide="play"></i>
+        </button>
+      </section>
+    </div>
+
+    <div id="webglError" role="alert">
+      <p>No fue posible iniciar la escena 3D. Comprueba que WebGL este habilitado y vuelve a cargar la pagina.</p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.js"></script>
+  <script type="module" src="./js/game.js"></script>
+</body>
+</html>
