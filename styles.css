@@ -416,6 +416,15 @@ button:focus-visible {
   background: rgba(255, 255, 255, .045);
 }
 
+.orientation-picker.fixed {
+  grid-template-columns: 1fr;
+}
+
+.orientation-picker.fixed .orientation-option:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 .steering-guide {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
@@ -519,11 +528,6 @@ button:focus-visible {
   display: block;
   border: 1.5px solid currentColor;
   border-radius: 2px;
-}
-
-.orientation-shape.portrait {
-  width: 9px;
-  height: 14px;
 }
 
 .orientation-shape.landscape {

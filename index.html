@@ -62,8 +62,8 @@
           <button id="soundBtn" class="tool" type="button" data-tooltip="Desactivar sonido" aria-label="Desactivar sonido">
             <i data-lucide="volume-2"></i>
           </button>
-          <button id="orientationBtn" class="tool" type="button" data-tooltip="Cambiar a horizontal" aria-label="Orientacion vertical. Cambiar a horizontal">
-            <i data-lucide="rectangle-vertical"></i>
+          <button id="orientationBtn" class="tool" type="button" data-tooltip="Horizontal fija" aria-label="Orientacion horizontal fija, siempre del mismo lado">
+            <i data-lucide="rectangle-horizontal"></i>
           </button>
           <button id="fullscreenBtn" class="tool" type="button" data-tooltip="Pantalla completa" aria-label="Pantalla completa">
             <i data-lucide="maximize"></i>
@@ -89,25 +89,21 @@
         <div class="intro-meta">POOL CLUB <span></span> RONDA 01</div>
         <div class="orientation-setting">
           <span id="orientationLabel" class="orientation-label">Orientacion fija del dispositivo</span>
-          <div id="orientationPicker" class="orientation-picker" role="group" aria-labelledby="orientationLabel">
-            <button class="orientation-option" type="button" data-orientation="portrait" aria-pressed="true">
-              <span class="orientation-shape portrait" aria-hidden="true"></span>
-              Vertical
-            </button>
-            <button class="orientation-option" type="button" data-orientation="landscape" aria-pressed="false">
+          <div id="orientationPicker" class="orientation-picker fixed" role="note" aria-labelledby="orientationLabel">
+            <button class="orientation-option" type="button" data-orientation="landscape" aria-pressed="true" disabled>
               <span class="orientation-shape landscape" aria-hidden="true"></span>
-              Horizontal
+              Horizontal · lado fijo
             </button>
           </div>
-          <div class="steering-guide" role="note" aria-label="La parte mas baja de la tablet guia el rumbo de las bolas">
+          <div class="steering-guide" role="note" aria-label="Cada giro corto de la tablet cambia el rumbo cuarenta y cinco grados">
             <div class="steering-visual" aria-hidden="true">
               <i class="steering-arrow" data-lucide="undo-2"></i>
               <i class="steering-tablet" data-lucide="tablet"></i>
               <i class="steering-arrow right" data-lucide="redo-2"></i>
             </div>
             <div class="steering-copy">
-              <strong>LA PARTE BAJA MARCA EL RUMBO</strong>
-              <span>Gírala como un volante: las bolas siguen la gravedad y nunca se detienen.</span>
+              <strong>CADA GIRO CAMBIA 45°</strong>
+              <span>Gírala a un lado y vuelve al centro: la bola seguirá derecho.</span>
             </div>
           </div>
         </div>
@@ -122,7 +118,7 @@
       <div class="orientation-guard-panel">
         <i data-lucide="rotate-cw"></i>
         <strong id="orientationGuardTitle">GIRA TU DISPOSITIVO</strong>
-        <span id="orientationGuardText">Este juego esta configurado para usarse en vertical.</span>
+        <span id="orientationGuardText">Este juego solo funciona en horizontal y del lado principal.</span>
       </div>
     </div>
 

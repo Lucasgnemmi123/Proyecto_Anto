@@ -53,16 +53,16 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let round = 1;
   let selectedBallCount = 1;
   let selectedPocketCount = 1;
-  let selectedOrientation = readOrientationPreference();
   let orientationMismatch = false;
   let started = false;
   let captures = [];
   let lastFrame = performance.now();
   let sensorSeen = false;
   let motionSeen = false;
+  let turnReferenceAngle = null;
+  let turnTiltDegrees = 0;
+  let turnGestureArmed = false;
   let gravityFilterReady = false;
-  let gravityReferenceAngle = null;
-  let gravityHeading = Math.PI / 2;
   let rawGravityX = 0;
   let rawGravityY = 0;
   let filteredGravityX = 0;
@@ -819,18 +819,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
     setStatus(`${selectedPocketCount} ${noun} EN ZONAS ALEATORIAS`, sensorSeen);
   }
 
-  function readOrientationPreference() {
-    try {
-      const stored = window.localStorage.getItem('pocketTiltOrientation');
-      if (stored === 'portrait' || stored === 'landscape') return stored;
-    } catch (error) {
-      console.info('No fue posible leer la orientacion guardada:', error);
-    }
-    return window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
-  }
-
   function desiredOrientationType() {
-    return `${selectedOrientation}-primary`;
+    return 'landscape-primary';
   }
 
   function currentScreenOrientationType() {
@@ -841,7 +831,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (typeof window.orientation !== 'number') return `${mode}-primary`;
     const angle = ((window.orientation % 360) + 360) % 360;
     if (mode === 'portrait') return angle === 180 ? 'portrait-secondary' : 'portrait-primary';
-    return angle === 270 ? 'landscape-secondary' : 'landscape-primary';
+    return angle === 180 || angle === 270 ? 'landscape-secondary' : 'landscape-primary';
   }
 
   function setStatus(text, active) {
@@ -853,54 +843,33 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   function updateOrientationUi() {
-    const isPortrait = selectedOrientation === 'portrait';
-    const currentLabel = isPortrait ? 'vertical' : 'horizontal';
-    const nextLabel = isPortrait ? 'horizontal' : 'vertical';
-
     orientationOptions.forEach(option => {
-      option.setAttribute('aria-pressed', String(option.dataset.orientation === selectedOrientation));
+      option.setAttribute('aria-pressed', String(option.dataset.orientation === 'landscape'));
     });
-    orientationBtn.dataset.tooltip = `Cambiar a ${nextLabel}`;
-    orientationBtn.setAttribute('aria-label', `Orientacion ${currentLabel}. Cambiar a ${nextLabel}`);
-    orientationBtn.innerHTML = `<i data-lucide="${isPortrait ? 'rectangle-vertical' : 'rectangle-horizontal'}"></i>`;
-    orientationGuardText.textContent = `Usa el dispositivo en ${currentLabel}, siempre del mismo lado.`;
-    document.documentElement.dataset.gameOrientation = selectedOrientation;
+    orientationBtn.dataset.tooltip = 'Horizontal fija';
+    orientationBtn.setAttribute('aria-label', 'Orientacion horizontal fija, siempre del mismo lado');
+    orientationBtn.innerHTML = '<i data-lucide="rectangle-horizontal"></i>';
+    orientationGuardText.textContent = 'Usa el dispositivo en horizontal y siempre del lado principal.';
+    document.documentElement.dataset.gameOrientation = 'landscape';
     initIcons();
   }
 
   function updateOrientationState() {
     const wasMismatched = orientationMismatch;
     const currentType = currentScreenOrientationType();
-    const sameMode = currentType.startsWith(selectedOrientation);
+    const sameMode = currentType.startsWith('landscape');
     orientationMismatch = started && currentType !== desiredOrientationType();
     orientationGuard.classList.toggle('visible', orientationMismatch);
     orientationGuard.setAttribute('aria-hidden', String(!orientationMismatch));
     orientationGuardTitle.textContent = sameMode ? 'NO INVIERTAS EL DISPOSITIVO' : 'GIRA TU DISPOSITIVO';
     orientationGuardText.textContent = sameMode
-      ? `Vuelve al lado principal de la orientacion ${selectedOrientation === 'portrait' ? 'vertical' : 'horizontal'}.`
-      : `Este juego esta fijado en ${selectedOrientation === 'portrait' ? 'vertical' : 'horizontal'}.`;
+      ? 'Vuelve al lado principal de la orientación horizontal.'
+      : 'Este juego está fijado únicamente en horizontal.';
 
     if (orientationMismatch && !wasMismatched) {
-      setStatus(sameMode ? 'NO INVIERTAS EL DISPOSITIVO' : `GIRA A ${selectedOrientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, false);
+      setStatus(sameMode ? 'NO INVIERTAS EL DISPOSITIVO' : 'GIRA A HORIZONTAL', false);
     } else if (!orientationMismatch && wasMismatched) {
       calibrate();
-    }
-  }
-
-  function setSelectedOrientation(orientation, announce = false) {
-    if (orientation !== 'portrait' && orientation !== 'landscape') return;
-    const changed = orientation !== selectedOrientation;
-    selectedOrientation = orientation;
-    try {
-      window.localStorage.setItem('pocketTiltOrientation', orientation);
-    } catch (error) {
-      console.info('No fue posible guardar la orientacion:', error);
-    }
-    updateOrientationUi();
-    updateOrientationState();
-    if (changed) calibrate();
-    if (announce && !orientationMismatch) {
-      setStatus(`MODO ${orientation === 'portrait' ? 'VERTICAL' : 'HORIZONTAL'}`, sensorSeen);
     }
   }
 
@@ -993,13 +962,13 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const gravityMagnitude = Math.hypot(filteredGravityX, filteredGravityY);
     if (gravityMagnitude >= SETTINGS.gravityPlaneMinimum) {
       const gravityAngle = Math.atan2(filteredGravityY, filteredGravityX);
-      if (gravityReferenceAngle === null) {
-        gravityReferenceAngle = gravityAngle;
-        gravityHeading = Math.PI / 2;
-        setStatus('LA PARTE BAJA GUÍA LAS BOLAS', true);
+      if (turnReferenceAngle === null) {
+        turnReferenceAngle = gravityAngle;
+        turnTiltDegrees = 0;
+        turnGestureArmed = true;
+        setStatus('GIRA 12° PARA CAMBIAR EL RUMBO', true);
       } else {
-        const rotationFromReference = normalizeAngle(gravityAngle - gravityReferenceAngle);
-        gravityHeading = normalizeAngle(Math.PI / 2 - rotationFromReference);
+        turnTiltDegrees = -normalizeAngle(gravityAngle - turnReferenceAngle) * 180 / Math.PI;
       }
     }
   }
@@ -1008,20 +977,22 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (typeof event.beta !== 'number' || typeof event.gamma !== 'number') return;
     if (!sensorSeen) {
       sensorSeen = true;
-      setStatus('ESPERANDO GRAVEDAD DEL DISPOSITIVO', false);
+      setStatus('ESPERANDO GIRO DEL DISPOSITIVO', false);
     }
   }
 
   function calibrate() {
     smoothSteering = 0;
-    gravityReferenceAngle = null;
-    gravityHeading = Math.PI / 2;
+    turnReferenceAngle = null;
+    turnTiltDegrees = 0;
+    turnGestureArmed = false;
 
     if (motionSeen && gravityFilterReady) {
       filteredGravityX = rawGravityX;
       filteredGravityY = rawGravityY;
       if (Math.hypot(filteredGravityX, filteredGravityY) >= SETTINGS.gravityPlaneMinimum) {
-        gravityReferenceAngle = Math.atan2(filteredGravityY, filteredGravityX);
+        turnReferenceAngle = Math.atan2(filteredGravityY, filteredGravityX);
+        turnGestureArmed = true;
       }
     }
 
@@ -1227,10 +1198,25 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const targetSteering = mobileOptimized ? 0 : keyboardX;
 
     const now = performance.now();
-    const gravityControlFresh = motionSeen
-      && gravityReferenceAngle !== null
-      && now - lastMotionAt < 350
-      && !orientationMismatch;
+    const turnGestureFresh = motionSeen
+      && turnReferenceAngle !== null
+      && now - lastMotionAt < 350;
+    let gestureTurnDelta = 0;
+    if (turnGestureFresh && !orientationMismatch) {
+      const turnTiltMagnitude = Math.abs(turnTiltDegrees);
+      if (!turnGestureArmed && turnTiltMagnitude <= SETTINGS.turnGestureRelease) {
+        turnGestureArmed = true;
+        setStatus('LISTO PARA EL SIGUIENTE GIRO', true);
+      } else if (turnGestureArmed && turnTiltMagnitude >= SETTINGS.turnGestureThreshold) {
+        const direction = Math.sign(turnTiltDegrees);
+        gestureTurnDelta = direction * SETTINGS.turnGestureDegrees * Math.PI / 180;
+        turnGestureArmed = false;
+        setStatus(direction > 0 ? 'NUEVO RUMBO: 45° DERECHA' : 'NUEVO RUMBO: 45° IZQUIERDA', true);
+        if (navigator.vibrate) navigator.vibrate(16);
+      }
+    } else {
+      turnGestureArmed = false;
+    }
 
     const frameScale = clamp((event.delta || 16.67) / 16.67, .5, 2);
     const steeringResponse = Math.abs(targetSteering) < .001
@@ -1244,14 +1230,11 @@ import { SCENARIOS, SETTINGS } from './config.js';
       const currentVelocity = ball.body.velocity;
       const speed = Math.hypot(currentVelocity.x, currentVelocity.y);
       const currentHeading = speed > .35 ? Math.atan2(currentVelocity.y, currentVelocity.x) : ball.heading;
-      let drivenHeading;
-      if (gravityControlFresh) {
-        const gravityBlend = 1 - Math.pow(1 - SETTINGS.gravitySteeringResponse, frameScale);
-        const headingError = normalizeAngle(gravityHeading - currentHeading);
-        drivenHeading = normalizeAngle(currentHeading + headingError * gravityBlend);
-      } else {
-        drivenHeading = normalizeAngle(currentHeading + smoothSteering * SETTINGS.turnRate * frameScale);
-      }
+      const drivenHeading = normalizeAngle(
+        currentHeading
+        + gestureTurnDelta
+        + smoothSteering * SETTINGS.turnRate * frameScale
+      );
       ball.heading = drivenHeading;
 
       const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
@@ -1473,12 +1456,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   removePocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount - 1));
   addPocketBtn.addEventListener('click', () => setPocketCount(selectedPocketCount + 1));
   calibrateBtn.addEventListener('click', calibrate);
-  orientationOptions.forEach(option => {
-    option.addEventListener('click', () => setSelectedOrientation(option.dataset.orientation));
-  });
   orientationBtn.addEventListener('click', () => {
-    const nextOrientation = selectedOrientation === 'portrait' ? 'landscape' : 'portrait';
-    setSelectedOrientation(nextOrientation, true);
+    setStatus('HORIZONTAL FIJA · LADO PRINCIPAL', sensorSeen);
     void lockSelectedOrientation();
   });
   soundBtn.addEventListener('click', () => {
