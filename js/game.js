@@ -65,12 +65,17 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let rawGamma = 0;
   let motionSeen = false;
   let gravityFilterReady = false;
-  let filteredLateralGravity = 0;
-  let neutralLateralGravity = 0;
+  let rawGravityX = 0;
+  let rawGravityY = 0;
+  let filteredGravityX = 0;
+  let filteredGravityY = 0;
+  let neutralGravityX = 0;
+  let neutralGravityY = 0;
   let gravityStability = 0;
   let gravityCalibrationActive = false;
   let gravityCalibrationUntil = 0;
-  let gravityCalibrationSum = 0;
+  let gravityCalibrationSumX = 0;
+  let gravityCalibrationSumY = 0;
   let gravityCalibrationSamples = 0;
   let lastMotionAt = 0;
   let smoothSteering = 0;
@@ -867,13 +872,10 @@ import { SCENARIOS, SETTINGS } from './config.js';
     return { x: gammaDelta, y: betaDelta };
   }
 
-  function mapGravityToLateral(x, y) {
-    const angle = ((screenAngle() % 360) + 360) % 360;
-    let screenX = x;
-    if (angle === 90) screenX = -y;
-    else if (angle === 270) screenX = y;
-    else if (angle === 180) screenX = -x;
-    return -screenX;
+  function relativeLateralGravity(x = filteredGravityX, y = filteredGravityY) {
+    const neutralMagnitude = Math.hypot(neutralGravityX, neutralGravityY);
+    if (neutralMagnitude < 1) return 0;
+    return (neutralGravityY * x - neutralGravityX * y) / neutralMagnitude;
   }
 
   function setStatus(text, active) {
@@ -1003,9 +1005,12 @@ import { SCENARIOS, SETTINGS } from './config.js';
   }
 
   function finishGravityCalibration() {
-    neutralLateralGravity = gravityCalibrationSamples > 0
-      ? gravityCalibrationSum / gravityCalibrationSamples
-      : filteredLateralGravity;
+    neutralGravityX = gravityCalibrationSamples > 0
+      ? gravityCalibrationSumX / gravityCalibrationSamples
+      : filteredGravityX;
+    neutralGravityY = gravityCalibrationSamples > 0
+      ? gravityCalibrationSumY / gravityCalibrationSamples
+      : filteredGravityY;
     gravityCalibrationActive = false;
     gravityStability = 0;
     smoothSteering = 0;
@@ -1016,19 +1021,26 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const acceleration = event.accelerationIncludingGravity;
     if (!acceleration || typeof acceleration.x !== 'number' || typeof acceleration.y !== 'number') return;
 
-    const lateralGravity = mapGravityToLateral(acceleration.x, acceleration.y);
+    rawGravityX = acceleration.x;
+    rawGravityY = acceleration.y;
     const firstMotionReading = !motionSeen;
     lastMotionAt = performance.now();
     motionSeen = true;
     sensorSeen = true;
 
     if (!gravityFilterReady) {
-      filteredLateralGravity = lateralGravity;
+      filteredGravityX = rawGravityX;
+      filteredGravityY = rawGravityY;
       gravityFilterReady = true;
     } else {
-      const previousGravity = filteredLateralGravity;
-      filteredLateralGravity += (lateralGravity - filteredLateralGravity) * SETTINGS.gravityFilter;
-      const gravityChange = Math.abs(filteredLateralGravity - previousGravity);
+      const previousGravityX = filteredGravityX;
+      const previousGravityY = filteredGravityY;
+      filteredGravityX += (rawGravityX - filteredGravityX) * SETTINGS.gravityFilter;
+      filteredGravityY += (rawGravityY - filteredGravityY) * SETTINGS.gravityFilter;
+      const gravityChange = Math.hypot(
+        filteredGravityX - previousGravityX,
+        filteredGravityY - previousGravityY
+      );
       gravityStability += (gravityChange - gravityStability) * .12;
     }
 
@@ -1038,17 +1050,21 @@ import { SCENARIOS, SETTINGS } from './config.js';
     }
 
     if (gravityCalibrationActive) {
-      gravityCalibrationSum += filteredLateralGravity;
+      gravityCalibrationSumX += filteredGravityX;
+      gravityCalibrationSumY += filteredGravityY;
       gravityCalibrationSamples += 1;
       if (lastMotionAt >= gravityCalibrationUntil) finishGravityCalibration();
       return;
     }
 
-    const gravityDelta = filteredLateralGravity - neutralLateralGravity;
+    const gravityDelta = relativeLateralGravity();
     const canRecenter = !orientationMismatch
       && Math.abs(gravityDelta) <= SETTINGS.gravityRecenterWindow
       && gravityStability <= SETTINGS.gravityStabilityThreshold;
-    if (canRecenter) neutralLateralGravity += gravityDelta * SETTINGS.gravityRecenterRate;
+    if (canRecenter) {
+      neutralGravityX += (filteredGravityX - neutralGravityX) * SETTINGS.gravityRecenterRate;
+      neutralGravityY += (filteredGravityY - neutralGravityY) * SETTINGS.gravityRecenterRate;
+    }
   }
 
   function onOrientation(event) {
@@ -1068,9 +1084,12 @@ import { SCENARIOS, SETTINGS } from './config.js';
     smoothSteering = 0;
 
     if (motionSeen && gravityFilterReady) {
+      filteredGravityX = rawGravityX;
+      filteredGravityY = rawGravityY;
       gravityCalibrationActive = true;
       gravityCalibrationUntil = performance.now() + SETTINGS.calibrationDuration;
-      gravityCalibrationSum = filteredLateralGravity;
+      gravityCalibrationSumX = filteredGravityX;
+      gravityCalibrationSumY = filteredGravityY;
       gravityCalibrationSamples = 1;
       gravityStability = 0;
       setStatus('MANTEN LA TABLET RECTA Y QUIETA', true);
@@ -1290,7 +1309,7 @@ import { SCENARIOS, SETTINGS } from './config.js';
     if (motionFresh) {
       if (!gravityCalibrationActive) {
         targetSteering += normalizeSteering(
-          filteredLateralGravity - neutralLateralGravity,
+          relativeLateralGravity(),
           SETTINGS.gravityDeadZone,
           SETTINGS.gravityRange,
           SETTINGS.gravityCurve
