@@ -24,6 +24,8 @@ import { SCENARIOS, SETTINGS } from './config.js';
   const removePocketBtn = document.getElementById('removePocketBtn');
   const controlStatus = document.getElementById('controlStatus');
   const statusText = document.getElementById('statusText');
+  const steeringIndicator = document.getElementById('steeringIndicator');
+  const steeringMarker = document.getElementById('steeringMarker');
   const calibrateBtn = document.getElementById('calibrateBtn');
   const soundBtn = document.getElementById('soundBtn');
   const orientationBtn = document.getElementById('orientationBtn');
@@ -59,9 +61,10 @@ import { SCENARIOS, SETTINGS } from './config.js';
   let lastFrame = performance.now();
   let sensorSeen = false;
   let motionSeen = false;
-  let turnReferenceAngle = null;
-  let turnTiltDegrees = 0;
-  let turnGestureArmed = false;
+  let steeringReferenceAngle = null;
+  let steeringTiltDegrees = 0;
+  let steeringDirectionStatus = 'center';
+  let displayedSteeringPercent = 0;
   let gravityFilterReady = false;
   let rawGravityX = 0;
   let rawGravityY = 0;
@@ -962,13 +965,12 @@ import { SCENARIOS, SETTINGS } from './config.js';
     const gravityMagnitude = Math.hypot(filteredGravityX, filteredGravityY);
     if (gravityMagnitude >= SETTINGS.gravityPlaneMinimum) {
       const gravityAngle = Math.atan2(filteredGravityY, filteredGravityX);
-      if (turnReferenceAngle === null) {
-        turnReferenceAngle = gravityAngle;
-        turnTiltDegrees = 0;
-        turnGestureArmed = true;
-        setStatus('GIRA 12° PARA CAMBIAR EL RUMBO', true);
+      if (steeringReferenceAngle === null) {
+        steeringReferenceAngle = gravityAngle;
+        steeringTiltDegrees = 0;
+        setStatus('INCLINA A UN LADO PARA DOBLAR', true);
       } else {
-        turnTiltDegrees = -normalizeAngle(gravityAngle - turnReferenceAngle) * 180 / Math.PI;
+        steeringTiltDegrees = normalizeAngle(gravityAngle - steeringReferenceAngle) * 180 / Math.PI;
       }
     }
   }
@@ -983,16 +985,18 @@ import { SCENARIOS, SETTINGS } from './config.js';
 
   function calibrate() {
     smoothSteering = 0;
-    turnReferenceAngle = null;
-    turnTiltDegrees = 0;
-    turnGestureArmed = false;
+    steeringReferenceAngle = null;
+    steeringTiltDegrees = 0;
+    steeringDirectionStatus = 'center';
+    engine.gravity.x = 0;
+    engine.gravity.y = 0;
+    updateSteeringIndicator(0);
 
     if (motionSeen && gravityFilterReady) {
       filteredGravityX = rawGravityX;
       filteredGravityY = rawGravityY;
       if (Math.hypot(filteredGravityX, filteredGravityY) >= SETTINGS.gravityPlaneMinimum) {
-        turnReferenceAngle = Math.atan2(filteredGravityY, filteredGravityX);
-        turnGestureArmed = true;
+        steeringReferenceAngle = Math.atan2(filteredGravityY, filteredGravityX);
       }
     }
 
@@ -1193,30 +1197,42 @@ import { SCENARIOS, SETTINGS } from './config.js';
     return Math.atan2(Math.sin(angle), Math.cos(angle));
   }
 
+  function steeringAfterDeadZone(tiltDegrees) {
+    const magnitude = Math.abs(tiltDegrees);
+    if (magnitude <= SETTINGS.tiltDeadZone) return 0;
+    const usableRange = Math.max(1, SETTINGS.tiltMaximum - SETTINGS.tiltDeadZone);
+    return Math.sign(tiltDegrees) * clamp(
+      (magnitude - SETTINGS.tiltDeadZone) / usableRange,
+      0,
+      1
+    );
+  }
+
+  function updateSteeringIndicator(value) {
+    const percent = Math.round(clamp(value, -1, 1) * 100);
+    if (percent === displayedSteeringPercent) return;
+    displayedSteeringPercent = percent;
+    const direction = percent < -8 ? 'left' : percent > 8 ? 'right' : 'center';
+    const valueText = direction === 'center'
+      ? 'Rumbo recto'
+      : `Doblando ${Math.abs(percent)}% hacia la ${direction === 'left' ? 'izquierda' : 'derecha'}`;
+    steeringMarker.style.left = `${50 + percent * .42}%`;
+    steeringIndicator.dataset.direction = direction;
+    steeringIndicator.setAttribute('aria-valuenow', String(percent));
+    steeringIndicator.setAttribute('aria-valuetext', valueText);
+    steeringIndicator.title = valueText;
+  }
+
   Events.on(engine, 'beforeUpdate', event => {
     if (!started) return;
-    const targetSteering = mobileOptimized ? 0 : keyboardX;
-
     const now = performance.now();
-    const turnGestureFresh = motionSeen
-      && turnReferenceAngle !== null
+    const tiltFresh = motionSeen
+      && steeringReferenceAngle !== null
       && now - lastMotionAt < 350;
-    let gestureTurnDelta = 0;
-    if (turnGestureFresh && !orientationMismatch) {
-      const turnTiltMagnitude = Math.abs(turnTiltDegrees);
-      if (!turnGestureArmed && turnTiltMagnitude <= SETTINGS.turnGestureRelease) {
-        turnGestureArmed = true;
-        setStatus('LISTO PARA EL SIGUIENTE GIRO', true);
-      } else if (turnGestureArmed && turnTiltMagnitude >= SETTINGS.turnGestureThreshold) {
-        const direction = Math.sign(turnTiltDegrees);
-        gestureTurnDelta = direction * SETTINGS.turnGestureDegrees * Math.PI / 180;
-        turnGestureArmed = false;
-        setStatus(direction > 0 ? 'NUEVO RUMBO: 45° DERECHA' : 'NUEVO RUMBO: 45° IZQUIERDA', true);
-        if (navigator.vibrate) navigator.vibrate(16);
-      }
-    } else {
-      turnGestureArmed = false;
-    }
+    const sensorSteering = tiltFresh && !orientationMismatch
+      ? steeringAfterDeadZone(steeringTiltDegrees)
+      : 0;
+    const targetSteering = mobileOptimized ? sensorSteering : keyboardX;
 
     const frameScale = clamp((event.delta || 16.67) / 16.67, .5, 2);
     const steeringResponse = Math.abs(targetSteering) < .001
@@ -1224,26 +1240,72 @@ import { SCENARIOS, SETTINGS } from './config.js';
       : SETTINGS.steeringSmoothing;
     const steeringBlend = 1 - Math.pow(1 - steeringResponse, frameScale);
     smoothSteering += (clamp(targetSteering, -1, 1) - smoothSteering) * steeringBlend;
+    updateSteeringIndicator(smoothSteering);
+
+    const nextSteeringDirection = smoothSteering < -.08
+      ? 'left'
+      : smoothSteering > .08 ? 'right' : 'center';
+    if (nextSteeringDirection !== steeringDirectionStatus) {
+      steeringDirectionStatus = nextSteeringDirection;
+      setStatus(
+        nextSteeringDirection === 'left'
+          ? 'DOBLANDO A LA IZQUIERDA'
+          : nextSteeringDirection === 'right'
+            ? 'DOBLANDO A LA DERECHA'
+            : 'RUMBO RECTO',
+        true
+      );
+    }
 
     balls.forEach(ball => {
       if (ball.state !== 'active') return;
       const currentVelocity = ball.body.velocity;
       const speed = Math.hypot(currentVelocity.x, currentVelocity.y);
-      const currentHeading = speed > .35 ? Math.atan2(currentVelocity.y, currentVelocity.x) : ball.heading;
-      const drivenHeading = normalizeAngle(
-        currentHeading
-        + gestureTurnDelta
-        + smoothSteering * SETTINGS.turnRate * frameScale
-      );
-      ball.heading = drivenHeading;
+      const currentHeading = speed > .01
+        ? Math.atan2(currentVelocity.y, currentVelocity.x)
+        : ball.heading;
+      ball.heading = currentHeading;
 
       const accelerationBlend = 1 - Math.pow(1 - SETTINGS.autoAcceleration, frameScale);
       const nextSpeed = clamp(lerp(speed, SETTINGS.autoSpeed, accelerationBlend), 0, SETTINGS.maxSpeed);
-      const nextVelocity = {
-        x: Math.cos(drivenHeading) * nextSpeed,
-        y: Math.sin(drivenHeading) * nextSpeed
-      };
-      Body.setVelocity(ball.body, nextVelocity);
+      Body.setVelocity(ball.body, {
+        x: Math.cos(currentHeading) * nextSpeed,
+        y: Math.sin(currentHeading) * nextSpeed
+      });
+
+      if (Math.abs(smoothSteering) > .001) {
+        Body.applyForce(ball.body, ball.body.position, {
+          x: -Math.sin(currentHeading) * ball.body.mass * SETTINGS.tiltSteeringForce * smoothSteering,
+          y: Math.cos(currentHeading) * ball.body.mass * SETTINGS.tiltSteeringForce * smoothSteering
+        });
+      }
+
+      let assistedPocket = null;
+      let assistedDistance = SETTINGS.pocketAssistRadius;
+      pockets.forEach(pocket => {
+        const distance = Math.hypot(
+          pocket.body.position.x - ball.body.position.x,
+          pocket.body.position.y - ball.body.position.y
+        );
+        if (distance < assistedDistance) {
+          assistedPocket = pocket;
+          assistedDistance = distance;
+        }
+      });
+      if (assistedPocket && assistedDistance > .001) {
+        const assistX = (assistedPocket.body.position.x - ball.body.position.x) / assistedDistance;
+        const assistY = (assistedPocket.body.position.y - ball.body.position.y) / assistedDistance;
+        const forwardAlignment = Math.cos(currentHeading) * assistX + Math.sin(currentHeading) * assistY;
+        if (forwardAlignment > .15) {
+          const assistRange = Math.max(1, SETTINGS.pocketAssistRadius - SETTINGS.goalRadius);
+          const proximity = 1 - clamp((assistedDistance - SETTINGS.goalRadius) / assistRange, 0, 1);
+          const assistForce = ball.body.mass * SETTINGS.pocketAssistForce * proximity;
+          Body.applyForce(ball.body, ball.body.position, {
+            x: assistX * assistForce,
+            y: assistY * assistForce
+          });
+        }
+      }
 
       const captureDistance = SETTINGS.goalRadius - SETTINGS.ballRadius * .46;
       const targetPocket = pockets.find(pocket => (

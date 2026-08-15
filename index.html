@@ -74,6 +74,14 @@
       <div id="controlStatus">
         <span class="status-dot"></span>
         <span id="statusText">CONTROL LISTO</span>
+        <span id="steeringIndicator" role="meter" aria-label="Giro lateral" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Rumbo recto" data-direction="center">
+          <span class="steering-side left" aria-hidden="true">←</span>
+          <span class="steering-track" aria-hidden="true">
+            <span class="steering-center"></span>
+            <span id="steeringMarker"></span>
+          </span>
+          <span class="steering-side right" aria-hidden="true">→</span>
+        </span>
       </div>
 
       <div id="resultCallout" aria-live="polite">
@@ -95,15 +103,15 @@
               Horizontal · lado fijo
             </button>
           </div>
-          <div class="steering-guide" role="note" aria-label="Cada giro corto de la tablet cambia el rumbo cuarenta y cinco grados">
+          <div class="steering-guide" role="note" aria-label="Mueve la tablet lateralmente para doblar la trayectoria">
             <div class="steering-visual" aria-hidden="true">
               <i class="steering-arrow" data-lucide="undo-2"></i>
               <i class="steering-tablet" data-lucide="tablet"></i>
               <i class="steering-arrow right" data-lucide="redo-2"></i>
             </div>
             <div class="steering-copy">
-              <strong>CADA GIRO CAMBIA 45°</strong>
-              <span>Gírala a un lado y vuelve al centro: la bola seguirá derecho.</span>
+              <strong>MUÉVELA A LOS LADOS PARA DOBLAR</strong>
+              <span>Como un volante: al centrarla, las bolas siguen derecho.</span>
             </div>
           </div>
         </div>

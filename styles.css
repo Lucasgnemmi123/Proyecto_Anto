@@ -276,7 +276,7 @@ button:focus-visible {
   align-items: center;
   gap: 7px;
   min-height: 32px;
-  max-width: min(360px, calc(100vw - 28px));
+  max-width: min(480px, calc(100vw - 28px));
   padding: 7px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -285,6 +285,67 @@ button:focus-visible {
   font-size: 11px;
   font-weight: 750;
   backdrop-filter: blur(10px);
+}
+
+#statusText {
+  white-space: nowrap;
+}
+
+#steeringIndicator {
+  display: flex;
+  min-width: 122px;
+  align-items: center;
+  gap: 5px;
+  margin-left: 3px;
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+}
+
+.steering-side {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  transition: color .12s ease, text-shadow .12s ease;
+}
+
+#steeringIndicator[data-direction="left"] .steering-side.left,
+#steeringIndicator[data-direction="right"] .steering-side.right {
+  color: var(--accent);
+  text-shadow: 0 0 8px rgba(var(--accent-rgb), .6);
+}
+
+.steering-track {
+  position: relative;
+  width: 82px;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .065);
+}
+
+.steering-center {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 50%;
+  width: 1px;
+  background: rgba(255, 255, 255, .3);
+}
+
+#steeringMarker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), .75);
+  transform: translate(-50%, -50%);
+  transition: left .07s linear;
 }
 
 .status-dot {
@@ -650,6 +711,12 @@ button:focus-visible {
     bottom: calc(var(--safe-bottom) + 58px);
     max-width: calc(100vw - 24px);
     transform: translateX(-50%);
+  }
+
+  #statusText {
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   #intro {
