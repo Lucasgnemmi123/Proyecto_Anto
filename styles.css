@@ -744,15 +744,51 @@ button:focus-visible {
   }
 }
 
-@media (max-width: 700px) and (orientation: landscape) {
+@media (max-height: 520px) and (orientation: landscape) {
   .brand {
     display: none;
   }
 
   #sceneTabs {
     left: clamp(8px, 1.75vh, 14px);
-    width: min(240px, calc(100vw - 210px));
+    width: clamp(150px, 28vw, 240px);
     transform: none;
+  }
+
+  .setup-controls {
+    top: var(--safe-top);
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  #controlStatus {
+    width: min(320px, 62vh, calc(100vw - 24px));
+    min-height: 0;
+    padding: 5px 8px;
+  }
+
+  #statusText,
+  #controlStatus .status-dot {
+    display: none;
+  }
+
+  #steeringIndicator {
+    grid-template-columns: 16px minmax(0, 1fr) 16px;
+    gap: 5px;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .steering-side {
+    font-size: 15px;
+  }
+}
+
+@media (max-width: 620px) and (orientation: landscape) {
+  #orientationBtn {
+    display: none;
   }
 }
 
