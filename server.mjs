@@ -9,11 +9,17 @@ const contentTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8'
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml'
 };
 
 createServer((request, response) => {
-  const pathname = request.url === '/' ? '/index.html' : request.url.split('?')[0];
+  const requestPath = request.url.split('?')[0];
+  const pathname = requestPath.endsWith('/') ? `${requestPath}index.html` : requestPath;
   const relativePath = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, '');
   const filePath = join(root, relativePath);
 

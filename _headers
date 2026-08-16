@@ -6,3 +6,6 @@
 
 /index.html
   Cache-Control: public, max-age=0, must-revalidate
+
+/juegos/Gyro-ball/index.html
+  Cache-Control: public, max-age=0, must-revalidate
