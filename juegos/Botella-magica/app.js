@@ -29,8 +29,8 @@ const THEMES = {
     glow: '#8ff7ee',
     floor: '#0c5670',
     fill: 0.19,
-    wave: 5.5,
-    drag: 0.987,
+    wave: 4.6,
+    drag: 0.958,
     objects: ['fish', 'star', 'seahorse', 'shell', 'fish', 'pearl', 'seahorse', 'bubble']
   },
   beach: {
@@ -43,8 +43,8 @@ const THEMES = {
     glow: '#ffe6ad',
     floor: '#c98143',
     fill: 0.2,
-    wave: 3.8,
-    drag: 0.982,
+    wave: 3.2,
+    drag: 0.952,
     objects: ['crab', 'star', 'turtle', 'shell', 'crab', 'pebble', 'turtle', 'glass', 'sandDollar']
   },
   meadow: {
@@ -57,8 +57,8 @@ const THEMES = {
     glow: '#d9f5a3',
     floor: '#315d35',
     fill: 0.2,
-    wave: 4.6,
-    drag: 0.985,
+    wave: 3.8,
+    drag: 0.955,
     objects: ['butterfly', 'flower', 'ladybug', 'leaf', 'bee', 'acorn', 'beetle', 'butterfly']
   }
 };
@@ -95,7 +95,10 @@ const state = {
   lastTime: performance.now(),
   toastTimer: 0,
   wakeLock: null,
-  reduceMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  reduceMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  lowPower: navigator.maxTouchPoints > 0 || window.matchMedia('(any-pointer: coarse)').matches,
+  orientationBlocked: false,
+  resizeScheduled: false
 };
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
@@ -233,12 +236,25 @@ function roundedRectPath(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
+function scheduleResize() {
+  if (state.resizeScheduled) return;
+  state.resizeScheduled = true;
+  window.requestAnimationFrame(() => {
+    state.resizeScheduled = false;
+    resizeCanvas();
+  });
+}
+
 function resizeCanvas() {
   const previousInner = state.bottle?.inner;
   const previousVertical = state.bottle?.vertical;
-  state.width = window.innerWidth;
-  state.height = window.innerHeight;
-  const maximumDpr = state.width * state.height > 1_000_000 ? 1.5 : 1.75;
+  const viewport = window.visualViewport;
+  state.width = Math.round(viewport ? viewport.width : window.innerWidth);
+  state.height = Math.round(viewport ? viewport.height : window.innerHeight);
+  const area = state.width * state.height;
+  const maximumDpr = state.lowPower
+    ? (area > 500_000 ? 1.25 : 1.5)
+    : (area > 1_000_000 ? 1.5 : 1.75);
   state.dpr = Math.min(window.devicePixelRatio || 1, maximumDpr);
   canvas.width = Math.round(state.width * state.dpr);
   canvas.height = Math.round(state.height * state.dpr);
@@ -310,7 +326,8 @@ function createWorld() {
   const theme = THEMES[state.theme];
   const inner = state.bottle.inner;
   const baseSize = clamp(Math.min(inner.width, inner.height) * 0.055, 10, 22);
-  const count = clamp(Math.round(Math.sqrt(inner.width * inner.height) / 22), 20, 34);
+  const countRange = state.lowPower ? [14, 22] : [20, 34];
+  const count = clamp(Math.round(Math.sqrt(inner.width * inner.height) / 22), countRange[0], countRange[1]);
 
   state.objects = Array.from({ length: count }, (_, index) => {
     const radius = baseSize * randomBetween(0.62, 1.12);
@@ -348,13 +365,21 @@ function createWorld() {
     };
   });
 
-  state.motes = Array.from({ length: state.reduceMotion ? 24 : 46 }, () => ({
-    x: Math.random(),
-    y: Math.random(),
-    size: randomBetween(0.8, 3.2),
-    phase: randomBetween(0, Math.PI * 2),
-    speed: randomBetween(0.25, 0.8)
-  }));
+  const moteCount = state.reduceMotion ? 22 : (state.lowPower ? 40 : 58);
+  state.motes = Array.from({ length: moteCount }, (_, index) => {
+    const glitter = index % 5 !== 0;
+    return {
+      x: Math.random(),
+      y: Math.random(),
+      size: glitter ? randomBetween(0.6, 1.9) : randomBetween(1.4, 3.4),
+      phase: randomBetween(0, Math.PI * 2),
+      speed: randomBetween(0.18, 0.55),
+      glitter,
+      flare: glitter && Math.random() < 0.22,
+      twinklePhase: randomBetween(0, Math.PI * 2),
+      twinkleSpeed: randomBetween(0.6, 1.6)
+    };
+  });
   state.effects = [];
   state.ripples = [];
   state.draggedObject = null;
@@ -515,6 +540,7 @@ async function requestImmersiveMode() {
     // La experiencia sigue funcionando sin pantalla completa.
   }
 
+  await lockOrientationIfPossible();
 }
 
 async function requestWakeLock() {
@@ -529,9 +555,45 @@ async function requestWakeLock() {
   }
 }
 
+function isHandheldDevice() {
+  return state.lowPower && Math.min(state.width, state.height) < 900;
+}
+
+function getOrientationType() {
+  if (screen.orientation && screen.orientation.type) return screen.orientation.type;
+  const angle = Number(window.orientation);
+  if (!Number.isNaN(angle)) {
+    if (angle === 90) return 'landscape-primary';
+    if (angle === -90 || angle === 270) return 'landscape-secondary';
+    if (angle === 0) return 'portrait-primary';
+    if (angle === 180) return 'portrait-secondary';
+  }
+  return null;
+}
+
+async function lockOrientationIfPossible() {
+  if (!screen.orientation || typeof screen.orientation.lock !== 'function') return;
+  try {
+    await screen.orientation.lock('landscape-primary');
+  } catch {
+    try {
+      // Algunos navegadores no soportan el valor '-primary' pero sí 'landscape' genérico.
+      await screen.orientation.lock('landscape');
+    } catch {
+      // No soportado (p.ej. Safari en iOS): la guía de rotación cubre este caso.
+    }
+  }
+}
+
 function updateOrientationGuard() {
-  ui.guard.classList.remove('visible');
-  ui.guard.setAttribute('aria-hidden', 'true');
+  const portrait = state.width < state.height;
+  const wrongSide = getOrientationType() === 'landscape-secondary';
+  const shouldBlock = isHandheldDevice() && (portrait || wrongSide);
+  state.orientationBlocked = shouldBlock;
+  ui.guardTitle.textContent = wrongSide && !portrait ? 'Gira hacia el otro lado' : 'Gira el dispositivo';
+  ui.guard.classList.toggle('visible', shouldBlock);
+  ui.guard.setAttribute('aria-hidden', String(!shouldBlock));
+  if (shouldBlock) releaseDraggedObject();
 }
 
 function calibrate() {
@@ -662,8 +724,8 @@ function moveDraggedObject(event) {
   const nextX = clamp(point.x, inner.x + object.radius, inner.x + inner.width - object.radius);
   const nextY = clamp(point.y, inner.y + object.radius, inner.y + inner.height - object.radius);
 
-  object.vx = clamp(((nextX - state.dragSample.x) / elapsed) * 16.667, -11, 11);
-  object.vy = clamp(((nextY - state.dragSample.y) / elapsed) * 16.667, -11, 11);
+  object.vx = clamp(((nextX - state.dragSample.x) / elapsed) * 16.667, -6.5, 6.5);
+  object.vy = clamp(((nextY - state.dragSample.y) / elapsed) * 16.667, -6.5, 6.5);
   object.x = nextX;
   object.y = nextY;
   object.rotation += object.vx * 0.012;
@@ -680,8 +742,8 @@ function moveDraggedObject(event) {
 function releaseDraggedObject(event) {
   if (!state.draggedObject || (event && event.pointerId !== state.dragPointerId)) return false;
   const object = state.draggedObject;
-  object.vx = clamp(object.vx, -8.5, 8.5);
-  object.vy = clamp(object.vy, -8.5, 8.5);
+  object.vx = clamp(object.vx, -5, 5);
+  object.vy = clamp(object.vy, -5, 5);
   if (object.autonomous) object.swimAngle = Math.atan2(object.vy, object.vx);
   else object.angularVelocity = clamp((object.vx - object.vy) * 0.0014, -0.012, 0.012);
   spawnObjectEffect(object, true);
@@ -711,8 +773,8 @@ function updateEffects(delta) {
 
   for (let index = state.ripples.length - 1; index >= 0; index -= 1) {
     const ripple = state.ripples[index];
-    ripple.radius += 1.7 * delta;
-    ripple.life -= 0.022 * delta;
+    ripple.radius += 1 * delta;
+    ripple.life -= 0.012 * delta;
     if (ripple.life <= 0) state.ripples.splice(index, 1);
   }
 }
@@ -736,8 +798,8 @@ function scareCreature(creature, source) {
     distance = 1;
   }
 
-  const escapeSpeeds = { swim: 4.6, crawl: 3.5, fly: 4.2 };
-  const escapeSpeed = escapeSpeeds[creature.movementMode] || 3.8;
+  const escapeSpeeds = { swim: 2.9, crawl: 2.2, fly: 2.7 };
+  const escapeSpeed = escapeSpeeds[creature.movementMode] || 2.4;
 
   if (creature.movementMode === 'crawl') {
     const direction = Math.sign(dx) || (Math.random() > 0.5 ? 1 : -1);
@@ -777,16 +839,16 @@ function handleDraggedCollisions() {
 }
 
 function updatePhysics(delta) {
-  if (state.paused || !state.started) return;
+  if (state.paused || !state.started || state.orientationBlocked) return;
   const theme = THEMES[state.theme];
   const inner = state.bottle.inner;
   const motionScale = state.reduceMotion ? 0.48 : 1;
   const now = performance.now();
 
-  state.gravity.x += (state.targetGravity.x - state.gravity.x) * 0.065 * delta;
-  state.gravity.y += (state.targetGravity.y - state.gravity.y) * 0.065 * delta;
-  state.liquidGravity.x += (state.targetLiquidGravity.x - state.liquidGravity.x) * 0.075 * delta;
-  state.liquidGravity.y += (state.targetLiquidGravity.y - state.liquidGravity.y) * 0.075 * delta;
+  state.gravity.x += (state.targetGravity.x - state.gravity.x) * 0.04 * delta;
+  state.gravity.y += (state.targetGravity.y - state.gravity.y) * 0.04 * delta;
+  state.liquidGravity.x += (state.targetLiquidGravity.x - state.liquidGravity.x) * 0.045 * delta;
+  state.liquidGravity.y += (state.targetLiquidGravity.y - state.liquidGravity.y) * 0.045 * delta;
   const liquidMagnitude = Math.hypot(state.liquidGravity.x, state.liquidGravity.y);
   if (liquidMagnitude > 0.001) {
     state.liquidGravity.x /= liquidMagnitude;
@@ -799,21 +861,21 @@ function updatePhysics(delta) {
     if (object === state.draggedObject) continue;
     if (object.autonomous) {
       const frightened = now < object.scaredUntil;
-      object.swimPhase += (frightened ? 0.28 : object.movementMode === 'crawl' ? 0.075 : 0.105) * delta;
+      object.swimPhase += (frightened ? 0.22 : object.movementMode === 'crawl' ? 0.055 : 0.07) * delta;
 
       if (object.movementMode === 'crawl') {
         const down = state.liquidGravity;
         const tangent = { x: down.y, y: -down.x };
         const direction = object.crawlDirection;
         if (!frightened) {
-          const crawlForce = object.kind === 'turtle' ? 0.008 : 0.014;
+          const crawlForce = object.kind === 'turtle' ? 0.005 : 0.009;
           object.vx += tangent.x * direction * crawlForce * delta * motionScale;
           object.vy += tangent.y * direction * crawlForce * delta * motionScale;
         }
-        object.vx += (state.gravity.x * 0.032 + down.x * 0.01) * delta * motionScale;
-        object.vy += (state.gravity.y * 0.032 + down.y * 0.01) * delta * motionScale;
+        object.vx += (state.gravity.x * 0.022 + down.x * 0.008) * delta * motionScale;
+        object.vy += (state.gravity.y * 0.022 + down.y * 0.008) * delta * motionScale;
 
-        const maximumSpeed = frightened ? 4.1 : (object.kind === 'turtle' ? 0.7 : 1.05);
+        const maximumSpeed = frightened ? 2.6 : (object.kind === 'turtle' ? 0.42 : 0.65);
         const speed = Math.hypot(object.vx, object.vy);
         if (speed > maximumSpeed) {
           object.vx = (object.vx / speed) * maximumSpeed;
@@ -824,29 +886,29 @@ function updatePhysics(delta) {
       } else {
         if (!frightened) {
           const wandering = object.movementMode === 'fly' ? 1.5 : 1;
-          object.swimAngle += Math.sin(object.swimPhase * 0.43 + object.variant) * object.swimTurn * wandering * delta;
+          object.swimAngle += Math.sin(object.swimPhase * 0.43 + object.variant) * object.swimTurn * 0.6 * wandering * delta;
           const moveForce = object.movementMode === 'fly'
-            ? (object.kind === 'bee' ? 0.021 : 0.016)
-            : (object.kind === 'seahorse' ? 0.009 : 0.015);
+            ? (object.kind === 'bee' ? 0.013 : 0.01)
+            : (object.kind === 'seahorse' ? 0.006 : 0.009);
           object.vx += Math.cos(object.swimAngle) * moveForce * delta * motionScale;
           object.vy += Math.sin(object.swimAngle) * moveForce * (object.movementMode === 'fly' ? 0.9 : 0.72) * delta * motionScale;
         }
 
-        const gravityInfluence = object.movementMode === 'fly' ? 0.01 : 0.018;
+        const gravityInfluence = object.movementMode === 'fly' ? 0.007 : 0.012;
         object.vx += state.gravity.x * gravityInfluence * delta * motionScale;
         object.vy += state.gravity.y * gravityInfluence * 0.78 * delta * motionScale;
 
         const edgeMargin = Math.min(inner.width, inner.height) * 0.16;
-        if (object.x < inner.x + edgeMargin) object.vx += 0.028 * delta;
-        if (object.x > inner.x + inner.width - edgeMargin) object.vx -= 0.028 * delta;
-        if (object.y < inner.y + edgeMargin) object.vy += 0.024 * delta;
-        if (object.y > inner.y + inner.height - edgeMargin) object.vy -= 0.024 * delta;
+        if (object.x < inner.x + edgeMargin) object.vx += 0.018 * delta;
+        if (object.x > inner.x + inner.width - edgeMargin) object.vx -= 0.018 * delta;
+        if (object.y < inner.y + edgeMargin) object.vy += 0.015 * delta;
+        if (object.y > inner.y + inner.height - edgeMargin) object.vy -= 0.015 * delta;
 
         const maximumSpeed = frightened
-          ? 5.3
+          ? 3.2
           : object.movementMode === 'fly'
-            ? (object.kind === 'bee' ? 1.55 : 1.22)
-            : (object.kind === 'seahorse' ? 0.82 : 1.25);
+            ? (object.kind === 'bee' ? 0.95 : 0.78)
+            : (object.kind === 'seahorse' ? 0.52 : 0.78);
         const speed = Math.hypot(object.vx, object.vy);
         if (speed > maximumSpeed) {
           object.vx = (object.vx / speed) * maximumSpeed;
@@ -862,9 +924,9 @@ function updatePhysics(delta) {
       }
       object.angularVelocity = 0;
     } else {
-      const ambientLift = object.kind === 'bubble' || object.kind === 'butterfly' ? -0.018 : 0.014;
-      object.vx += (state.gravity.x * 0.085 * object.mass + state.liquidGravity.x * ambientLift) * delta * motionScale;
-      object.vy += (state.gravity.y * 0.075 * object.mass + state.liquidGravity.y * ambientLift) * delta * motionScale;
+      const ambientLift = object.kind === 'bubble' || object.kind === 'butterfly' ? -0.012 : 0.009;
+      object.vx += (state.gravity.x * 0.055 * object.mass + state.liquidGravity.x * ambientLift) * delta * motionScale;
+      object.vy += (state.gravity.y * 0.05 * object.mass + state.liquidGravity.y * ambientLift) * delta * motionScale;
       object.angularVelocity = clamp(object.angularVelocity * Math.pow(0.972, delta), -0.014, 0.014);
       object.rotation += object.angularVelocity * delta;
     }
@@ -892,18 +954,18 @@ function updatePhysics(delta) {
 
     if (object.x < left) {
       object.x = left;
-      object.vx = Math.abs(object.vx) * 0.58;
+      object.vx = Math.abs(object.vx) * 0.28;
       if (object.autonomous) object.swimAngle = Math.atan2(object.vy, object.vx);
-      else object.angularVelocity += 0.0015;
+      else object.angularVelocity += 0.0008;
       if (object.movementMode === 'crawl' && Math.abs(state.liquidGravity.y) > 0.45 && now - object.lastCrawlTurn > 360) {
         object.crawlDirection *= -1;
         object.lastCrawlTurn = now;
       }
     } else if (object.x > right) {
       object.x = right;
-      object.vx = -Math.abs(object.vx) * 0.58;
+      object.vx = -Math.abs(object.vx) * 0.28;
       if (object.autonomous) object.swimAngle = Math.atan2(object.vy, object.vx);
-      else object.angularVelocity -= 0.0015;
+      else object.angularVelocity -= 0.0008;
       if (object.movementMode === 'crawl' && Math.abs(state.liquidGravity.y) > 0.45 && now - object.lastCrawlTurn > 360) {
         object.crawlDirection *= -1;
         object.lastCrawlTurn = now;
@@ -912,15 +974,15 @@ function updatePhysics(delta) {
 
     if (object.y < top) {
       object.y = top;
-      object.vy = Math.abs(object.vy) * 0.55;
+      object.vy = Math.abs(object.vy) * 0.26;
       if (object.movementMode === 'crawl' && Math.abs(state.liquidGravity.x) > 0.45 && now - object.lastCrawlTurn > 360) {
         object.crawlDirection *= -1;
         object.lastCrawlTurn = now;
       }
     } else if (object.y > bottom) {
       object.y = bottom;
-      object.vy = -Math.abs(object.vy) * 0.48;
-      object.vx *= 0.94;
+      object.vy = -Math.abs(object.vy) * 0.22;
+      object.vx *= 0.9;
       if (object.movementMode === 'crawl' && Math.abs(state.liquidGravity.x) > 0.45 && now - object.lastCrawlTurn > 360) {
         object.crawlDirection *= -1;
         object.lastCrawlTurn = now;
@@ -1017,16 +1079,16 @@ function createGravitySurface(gapFraction) {
 
 function gravitySurfacePoint(frame, distance, time, waveHeight, includeRipples = false) {
   const waveScale = state.reduceMotion || state.paused ? 0.22 : 1;
-  let displacement = Math.sin(distance * 0.032 + time * 0.0015) * waveHeight * waveScale;
+  let displacement = Math.sin(distance * 0.024 + time * 0.00065) * waveHeight * waveScale;
 
   if (includeRipples) {
     for (const ripple of state.ripples) {
       const rippleDistance = (ripple.x - frame.surfaceCenter.x) * frame.tangent.x
         + (ripple.y - frame.surfaceCenter.y) * frame.tangent.y;
       const delta = distance - rippleDistance;
-      const envelope = Math.exp(-Math.abs(delta) / 120);
-      displacement += Math.sin(delta * 0.055 - (1 - ripple.life) * 13)
-        * ripple.strength * ripple.life * 7 * envelope;
+      const envelope = Math.exp(-Math.abs(delta) / 150);
+      displacement += Math.sin(delta * 0.04 - (1 - ripple.life) * 8)
+        * ripple.strength * ripple.life * 6 * envelope;
     }
   }
 
@@ -1155,14 +1217,39 @@ function drawMotes(time) {
   const theme = THEMES[state.theme];
   const down = state.liquidGravity;
   const tangent = { x: down.y, y: -down.x };
+  const speedScale = state.paused || state.reduceMotion ? 0.3 : 1;
   context.save();
   for (const mote of state.motes) {
-    const drift = Math.sin(time * 0.0004 * mote.speed + mote.phase);
-    const rise = (time * 0.006 * mote.speed + mote.phase * 3) % 24;
-    const x = inner.x + mote.x * inner.width + tangent.x * drift * 8 - down.x * rise;
-    const y = inner.y + mote.y * inner.height + tangent.y * drift * 8 - down.y * rise;
+    const drift = Math.sin(time * 0.00022 * mote.speed * speedScale + mote.phase);
+    const rise = (time * 0.0024 * mote.speed * speedScale + mote.phase * 3) % 24;
+    const x = inner.x + mote.x * inner.width + tangent.x * drift * 7 - down.x * rise;
+    const y = inner.y + mote.y * inner.height + tangent.y * drift * 7 - down.y * rise;
 
-    if (state.theme === 'ocean') {
+    if (mote.glitter) {
+      const twinkle = 0.28 + 0.72 * Math.abs(Math.sin(time * 0.0018 * mote.twinkleSpeed * speedScale + mote.twinklePhase));
+      context.globalCompositeOperation = 'lighter';
+      context.globalAlpha = twinkle;
+      context.fillStyle = theme.glow;
+      context.shadowColor = theme.glow;
+      context.shadowBlur = state.lowPower ? 3 : 6;
+      context.beginPath();
+      context.arc(x, y, mote.size, 0, Math.PI * 2);
+      context.fill();
+      if (mote.flare && twinkle > 0.82) {
+        context.strokeStyle = theme.glow;
+        context.lineWidth = 0.6;
+        const arm = mote.size * 2.6;
+        context.beginPath();
+        context.moveTo(x - arm, y);
+        context.lineTo(x + arm, y);
+        context.moveTo(x, y - arm);
+        context.lineTo(x, y + arm);
+        context.stroke();
+      }
+      context.shadowBlur = 0;
+      context.globalAlpha = 1;
+      context.globalCompositeOperation = 'source-over';
+    } else if (state.theme === 'ocean') {
       context.strokeStyle = `${theme.glow}65`;
       context.lineWidth = 1;
       context.beginPath();
@@ -1881,9 +1968,13 @@ canvas.addEventListener('pointerleave', () => {
   }
 });
 
-window.addEventListener('resize', resizeCanvas, { passive: true });
-window.addEventListener('orientationchange', () => window.setTimeout(resizeCanvas, 120), { passive: true });
-screen.orientation?.addEventListener?.('change', () => window.setTimeout(resizeCanvas, 80));
+window.addEventListener('resize', scheduleResize, { passive: true });
+window.addEventListener('orientationchange', () => window.setTimeout(scheduleResize, 120), { passive: true });
+window.visualViewport?.addEventListener?.('resize', scheduleResize, { passive: true });
+screen.orientation?.addEventListener?.('change', () => {
+  window.setTimeout(scheduleResize, 80);
+  if (state.started && !state.orientationBlocked) lockOrientationIfPossible();
+});
 
 document.addEventListener('visibilitychange', async () => {
   state.lastTime = performance.now();

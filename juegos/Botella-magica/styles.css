@@ -39,6 +39,7 @@ html,
 body {
   width: 100%;
   height: 100%;
+  height: 100dvh;
   margin: 0;
   overflow: hidden;
   background: var(--deep);
@@ -73,6 +74,8 @@ a:focus-visible {
 #bottleCanvas {
   position: fixed;
   inset: 0;
+  height: 100%;
+  height: 100dvh;
 }
 
 .game-shell {
@@ -911,10 +914,6 @@ a:focus-visible {
 
   .toast {
     top: 70px;
-  }
-
-  .orientation-guard {
-    display: none !important;
   }
 }
 
