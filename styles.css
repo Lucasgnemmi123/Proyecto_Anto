@@ -808,7 +808,7 @@ a:focus-visible {
 }
 
 .games-section::before {
-  content: "01";
+  content: "02";
   position: absolute;
   top: 4%;
   right: 3%;
@@ -840,6 +840,19 @@ a:focus-visible {
   color: var(--muted);
   font-size: 15px;
   line-height: 1.6;
+}
+
+.games-grid {
+  position: relative;
+  display: grid;
+  max-width: 1180px;
+  gap: clamp(28px, 4vw, 48px);
+  margin: 0 auto;
+}
+
+.games-grid .game-card {
+  width: 100%;
+  margin: 0;
 }
 
 .game-card {
@@ -937,6 +950,155 @@ a:focus-visible {
   background: linear-gradient(90deg, var(--gold), transparent);
   transform: rotate(-18deg);
   transform-origin: left;
+}
+
+.bottle-art {
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 50% 46%, rgba(121, 230, 220, .28), transparent 34%),
+    radial-gradient(circle at 12% 82%, rgba(111, 170, 255, .18), transparent 27%),
+    linear-gradient(145deg, #092638, #0d4350 58%, #09262f);
+}
+
+.bottle-art.game-art::after {
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  background:
+    radial-gradient(rgba(255, 255, 255, .25) .7px, transparent .7px),
+    linear-gradient(115deg, rgba(255, 255, 255, .05), transparent 42%);
+  background-size: 7px 7px, auto;
+  box-shadow: none;
+  opacity: .32;
+}
+
+.preview-glow {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: 58%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: rgba(121, 230, 220, .22);
+  filter: blur(42px);
+  transform: translate(-50%, -50%);
+}
+
+.sensory-bottle {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  width: 72%;
+  height: 48%;
+  overflow: hidden;
+  border: 7px solid rgba(240, 255, 252, .46);
+  border-radius: 36% 18% 18% 36% / 50% 26% 26% 50%;
+  background: rgba(6, 27, 39, .74);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, .18),
+    inset 18px 0 25px rgba(255, 255, 255, .09),
+    0 28px 48px rgba(0, 0, 0, .28);
+  transform: translate(-50%, -50%) rotate(-4deg);
+  animation: preview-bottle-tilt 5s ease-in-out infinite;
+}
+
+.sensory-bottle::before {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  top: 29%;
+  right: -8%;
+  width: 12%;
+  height: 42%;
+  border: 5px solid rgba(240, 255, 252, .4);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: #c79d59;
+  box-shadow: inset -8px 0 10px rgba(71, 44, 25, .3);
+}
+
+.preview-liquid {
+  position: absolute;
+  inset: 24% 0 0;
+  background: linear-gradient(180deg, rgba(105, 229, 227, .95), rgba(22, 135, 162, .94) 45%, rgba(7, 66, 95, .96));
+}
+
+.preview-wave {
+  position: absolute;
+  z-index: 2;
+  top: 17%;
+  left: -8%;
+  width: 116%;
+  height: 22%;
+  border-radius: 50%;
+  background: rgba(111, 236, 232, .85);
+  box-shadow: 0 0 18px rgba(143, 247, 238, .55);
+  animation: preview-wave 5s ease-in-out infinite;
+}
+
+.bottle-charm {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  color: #ffe18b;
+  font-size: clamp(16px, 2vw, 26px);
+  font-style: normal;
+  text-shadow: 0 6px 9px rgba(0, 0, 0, .25);
+  animation: preview-charm 4s ease-in-out infinite alternate;
+}
+
+.charm-one { top: 44%; left: 16%; }
+.charm-two { right: 22%; bottom: 12%; color: #ff9c8c; animation-delay: -1.5s; }
+.charm-three { top: 35%; left: 48%; color: #d8c8ff; animation-delay: -2.4s; }
+.charm-four { right: 8%; bottom: 34%; color: #a7ebb2; animation-delay: -.7s; }
+
+.preview-bubble {
+  position: absolute;
+  z-index: 3;
+  border: 1px solid rgba(255, 255, 255, .54);
+  border-radius: 50%;
+  background: rgba(121, 230, 220, .1);
+  box-shadow: inset -4px -4px 9px rgba(121, 230, 220, .16), 0 0 9px rgba(255, 255, 255, .08);
+  animation: preview-bubble-rise 5s ease-in-out infinite;
+}
+
+.bubble-a { top: 18%; left: 14%; width: 27px; height: 27px; }
+.bubble-b { right: 12%; bottom: 18%; width: 17px; height: 17px; animation-delay: -2s; }
+.bubble-c { top: 31%; right: 27%; width: 11px; height: 11px; animation-delay: -3.4s; }
+
+.bottle-card .game-info {
+  background: linear-gradient(145deg, rgba(20, 64, 70, .97), rgba(13, 31, 49, .99));
+}
+
+.bottle-card .game-kicker b {
+  background: #ffd47b;
+  color: #30210d;
+}
+
+.bottle-card .game-action {
+  color: #79e6dc;
+}
+
+@keyframes preview-bottle-tilt {
+  0%, 100% { transform: translate(-50%, -50%) rotate(-4deg); }
+  50% { transform: translate(-50%, -50%) rotate(4deg); }
+}
+
+@keyframes preview-wave {
+  0%, 100% { transform: translateY(3px) rotate(-3deg); }
+  50% { transform: translateY(-3px) rotate(3deg); }
+}
+
+@keyframes preview-charm {
+  to { translate: 12px -10px; rotate: 18deg; }
+}
+
+@keyframes preview-bubble-rise {
+  0%, 100% { translate: 0 12px; opacity: .25; }
+  50% { translate: 7px -18px; opacity: .85; }
 }
 
 .game-info {

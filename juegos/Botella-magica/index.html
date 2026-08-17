@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#071a27">
+  <meta name="description" content="Botella Mágica: una experiencia sensorial del Mundo de Anto controlada con la inclinación del dispositivo.">
+  <title>Botella Mágica · El Mundo de Anto</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body data-theme="ocean">
+  <main id="app" class="game-shell">
+    <canvas id="bottleCanvas" aria-label="Botella sensorial interactiva"></canvas>
+
+    <div class="ambient-light" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </div>
+
+    <header class="topbar">
+      <a class="home-link" href="../../" aria-label="Volver al Mundo de Anto">
+        <span aria-hidden="true">←</span>
+        <span>Mundo de Anto</span>
+      </a>
+
+      <div class="game-brand" aria-label="Botella Mágica">
+        <span class="brand-spark" aria-hidden="true">✦</span>
+        <span>
+          <strong>Botella Mágica</strong>
+          <small>Experiencia sensorial</small>
+        </span>
+      </div>
+
+      <div class="top-actions">
+        <button id="calibrateBtn" class="tool-button" type="button" aria-label="Estabilizar movimiento" title="Estabilizar movimiento">
+          <span aria-hidden="true">◎</span>
+          <span>Estabilizar</span>
+        </button>
+        <button id="fullscreenBtn" class="icon-button" type="button" aria-label="Pantalla completa" title="Pantalla completa">
+          <span aria-hidden="true">⛶</span>
+        </button>
+      </div>
+    </header>
+
+    <nav class="theme-picker" aria-label="Temas de la botella">
+      <button class="theme-button active" type="button" data-theme="ocean" aria-pressed="true">
+        <span aria-hidden="true">≈</span>
+        <strong>Océano</strong>
+      </button>
+      <button class="theme-button" type="button" data-theme="beach" aria-pressed="false">
+        <span aria-hidden="true">☼</span>
+        <strong>Playa</strong>
+      </button>
+      <button class="theme-button" type="button" data-theme="meadow" aria-pressed="false">
+        <span aria-hidden="true">⌁</span>
+        <strong>Pradera</strong>
+      </button>
+    </nav>
+
+    <section id="welcome" class="welcome-layer" aria-labelledby="gameTitle">
+      <div class="welcome-card">
+        <p class="eyebrow">Una pausa para observar</p>
+        <h1 id="gameTitle">Botella<br><em>Mágica</em></h1>
+        <p class="welcome-copy">
+          Inclina el dispositivo con suavidad, toca los objetos y mira cómo cada pequeño mundo cobra vida dentro de la botella.
+        </p>
+
+        <div class="orientation-guide" aria-label="Girar libremente el dispositivo en cualquier dirección">
+          <span class="device-shape" aria-hidden="true"><i></i></span>
+          <span>
+            <strong>Giro libre · 360°</strong>
+            <small>Puedes usarla horizontal, vertical o boca abajo: el líquido seguirá la gravedad.</small>
+          </span>
+        </div>
+
+        <ul class="welcome-notes">
+          <li><span aria-hidden="true">01</span> Gírala despacio</li>
+          <li><span aria-hidden="true">02</span> Toca, arrastra y suelta</li>
+          <li><span aria-hidden="true">03</span> Acerca objetos a las criaturas</li>
+        </ul>
+
+        <button id="startBtn" class="start-button" type="button">
+          <span>Activar botella</span>
+          <b aria-hidden="true">→</b>
+        </button>
+        <p id="supportHint" class="support-hint">En computador también puedes inclinarla moviendo el mouse.</p>
+      </div>
+    </section>
+
+    <section id="orientationGuard" class="orientation-guard" role="status" aria-live="polite" aria-hidden="true">
+      <div class="guard-card">
+        <span class="rotate-device" aria-hidden="true"><i></i></span>
+        <p class="eyebrow">Rotación libre</p>
+        <strong id="guardTitle">Giro 360°</strong>
+        <p id="guardText">La botella puede acompañar cualquier orientación del dispositivo.</p>
+      </div>
+    </section>
+
+    <footer class="sensory-bar">
+      <div class="sensor-status">
+        <span id="statusDot" aria-hidden="true"></span>
+        <span>
+          <small>Movimiento</small>
+          <strong id="statusText" aria-live="polite">Listo para activar</strong>
+        </span>
+      </div>
+
+      <div class="tilt-meter" aria-label="Nivel de inclinación">
+        <span aria-hidden="true">←</span>
+        <i><b id="tiltMarker"></b></i>
+        <span aria-hidden="true">→</span>
+      </div>
+
+      <button id="pauseBtn" class="pause-button" type="button" aria-pressed="false">
+        <span aria-hidden="true">Ⅱ</span>
+        <strong>Pausar</strong>
+      </button>
+    </footer>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </main>
+</body>
+</html>

@@ -7,6 +7,7 @@ Un espacio personal de juegos y experiencias accesibles.
 - **Inicio:** portada principal y acceso a las distintas secciones del proyecto.
 - **Juegos:** colección de experiencias jugables.
 - **Gyro-ball:** primer juego de la colección, controlado mediante inclinación lateral.
+- **Botella Mágica:** experiencia sensorial con física de líquido en 360°, criaturas animadas y tres mundos controlados mediante inclinación.
 
 ## Estructura
 
@@ -17,13 +18,17 @@ Proyecto_Anto/
 ├── assets/
 │   └── anto-hero-v2.png
 ├── juegos/
-│   └── Gyro-ball/
+│   ├── Gyro-ball/
+│   │   ├── index.html
+│   │   ├── styles.css
+│   │   └── js/
+│   │       ├── audio.js
+│   │       ├── config.js
+│   │       └── game.js
+│   └── Botella-magica/
 │       ├── index.html
 │       ├── styles.css
-│       └── js/
-│           ├── audio.js
-│           ├── config.js
-│           └── game.js
+│       └── app.js
 ├── server.mjs
 ├── netlify.toml
 └── _headers
@@ -41,6 +46,7 @@ node server.mjs
 
 - Inicio: `http://127.0.0.1:4173/`
 - Gyro-ball: `http://127.0.0.1:4173/juegos/Gyro-ball/`
+- Botella Mágica: `http://127.0.0.1:4173/juegos/Botella-magica/`
 
 Los sensores móviles normalmente requieren HTTPS, por lo que las pruebas del giroscopio deben realizarse en el despliegue publicado.
 
